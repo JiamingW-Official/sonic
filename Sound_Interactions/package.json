@@ -1,0 +1,11 @@
+{
+  "name": "sound-matrix",
+  "version": "1.0.0",
+  "description": "Web Audio 键盘合成器 — 无视觉，仅音效与键盘交互",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js"
+  },
+  "keywords": ["webaudio", "synth", "keyboard"],
+  "license": "MIT"
+}
