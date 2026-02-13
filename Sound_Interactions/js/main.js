@@ -1076,11 +1076,18 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     updateHeadBar();
   }
 
+  // Synth: low octave Z–M (C3–B3), mid Q–P (C4–E5), high [ ] (F5, G5)
   const KEY_TO_NOTE = {
     KeyZ: 48, KeyX: 50, KeyC: 52, KeyV: 53, KeyB: 55, KeyN: 57, KeyM: 59,
-    KeyA: 60, KeyS: 62, KeyD: 64, KeyF: 65, KeyG: 67, KeyH: 69, KeyJ: 71, KeyK: 72, KeyL: 74,
-    KeyQ: 72, KeyW: 74, KeyE: 76, KeyR: 77, KeyT: 79, KeyY: 81, KeyU: 83, KeyI: 84, KeyO: 86, KeyP: 88
+    KeyQ: 60, KeyW: 62, KeyE: 64, KeyR: 65, KeyT: 67, KeyY: 69, KeyU: 71, KeyI: 72, KeyO: 74, KeyP: 76,
+    BracketLeft: 77, BracketRight: 79
   };
+  // Drums: middle row A–L + ; and ' (11 pads, 2020s kit)
+  const DRUM_KEYS = {
+    KeyA: 'kick', KeyS: 'snare', KeyD: '808', KeyF: 'clap', KeyG: 'hatClosed', KeyH: 'hatOpen',
+    KeyJ: 'rim', KeyK: 'snap', KeyL: 'tomLow', Semicolon: 'tomMid', Quote: 'ride'
+  };
+  const DRUM_KEY_ORDER = ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL', 'Semicolon', 'Quote'];
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   function midiToNoteName(midi) {
     const oct = Math.floor(midi / 12) - 1;
@@ -1176,6 +1183,234 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     pingDelay.connect(pingGain);
     pongDelay.connect(pingGain);
     pingGain.connect(audioCtx.destination);
+  }
+
+  // --- Modern 2020s-style procedural drums (kick, snare, 808, hat, clap, etc.) ---
+  function playDrum(type) {
+    if (!audioCtx || !masterGain) return;
+    const now = audioCtx.currentTime;
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0;
+    gain.connect(masterGain);
+
+    function noiseBurst(duration, filterFreq, type) {
+      const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * duration, audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = type || 'highpass';
+      filter.frequency.value = filterFreq;
+      src.connect(filter);
+      filter.connect(gain);
+      src.start(now);
+      src.stop(now + duration);
+    }
+
+    switch (type) {
+      case 'kick': {
+        gain.gain.setValueAtTime(0.85, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.28);
+        noiseBurst(0.02, 200, 'highpass');
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(45, now + 0.08);
+        osc.frequency.exponentialRampToValueAtTime(30, now + 0.25);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.3);
+        break;
+      }
+      case 'snare': {
+        noiseBurst(0.12, 800, 'highpass');
+        const body = audioCtx.createOscillator();
+        body.type = 'triangle';
+        body.frequency.setValueAtTime(180, now);
+        body.frequency.exponentialRampToValueAtTime(80, now + 0.1);
+        body.connect(gain);
+        gain.gain.setValueAtTime(0.6, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.14);
+        body.start(now);
+        body.stop(now + 0.15);
+        break;
+      }
+      case '808': {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(65, now);
+        osc.frequency.exponentialRampToValueAtTime(45, now + 0.06);
+        osc.frequency.exponentialRampToValueAtTime(32, now + 0.5);
+        osc.connect(gain);
+        gain.gain.setValueAtTime(0.75, now);
+        gain.gain.exponentialRampToValueAtTime(0.35, now + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.55);
+        osc.start(now);
+        osc.stop(now + 0.6);
+        break;
+      }
+      case 'clap': {
+        for (let i = 0; i < 5; i++) {
+          const t = now + i * 0.012;
+          const b = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.06, audioCtx.sampleRate);
+          const d = b.getChannelData(0);
+          for (let j = 0; j < d.length; j++) d[j] = (Math.random() * 2 - 1) * Math.exp(-j / (d.length * 0.15));
+          const src = audioCtx.createBufferSource();
+          src.buffer = b;
+          const f = audioCtx.createBiquadFilter();
+          f.type = 'highpass';
+          f.frequency.value = 600;
+          src.connect(f);
+          f.connect(gain);
+          src.start(t);
+          src.stop(t + 0.06);
+        }
+        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        break;
+      }
+      case 'hatClosed': {
+        const b = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.05, audioCtx.sampleRate);
+        const d = b.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+        const src = audioCtx.createBufferSource();
+        src.buffer = b;
+        const f = audioCtx.createBiquadFilter();
+        f.type = 'highpass';
+        f.frequency.value = 7000;
+        f.Q.value = 0.5;
+        src.connect(f);
+        f.connect(gain);
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
+        src.start(now);
+        src.stop(now + 0.05);
+        break;
+      }
+      case 'hatOpen': {
+        const b = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.2, audioCtx.sampleRate);
+        const d = b.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (d.length * 2.5));
+        const src = audioCtx.createBufferSource();
+        src.buffer = b;
+        const f = audioCtx.createBiquadFilter();
+        f.type = 'bandpass';
+        f.frequency.value = 9000;
+        f.Q.value = 1;
+        src.connect(f);
+        f.connect(gain);
+        gain.gain.setValueAtTime(0.35, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+        src.start(now);
+        src.stop(now + 0.2);
+        break;
+      }
+      case 'rim': {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(900, now);
+        osc.frequency.exponentialRampToValueAtTime(400, now + 0.03);
+        osc.connect(gain);
+        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
+        osc.start(now);
+        osc.stop(now + 0.05);
+        noiseBurst(0.015, 2000, 'highpass');
+        break;
+      }
+      case 'snap': {
+        const b = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.04, audioCtx.sampleRate);
+        const d = b.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+        const src = audioCtx.createBufferSource();
+        src.buffer = b;
+        const f = audioCtx.createBiquadFilter();
+        f.type = 'highpass';
+        f.frequency.value = 1200;
+        src.connect(f);
+        f.connect(gain);
+        gain.gain.setValueAtTime(0.55, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.035);
+        src.start(now);
+        src.stop(now + 0.04);
+        break;
+      }
+      case 'tomLow': {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(100, now);
+        osc.frequency.exponentialRampToValueAtTime(55, now + 0.15);
+        osc.connect(gain);
+        gain.gain.setValueAtTime(0.6, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.22);
+        break;
+      }
+      case 'tomMid': {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(160, now);
+        osc.frequency.exponentialRampToValueAtTime(90, now + 0.12);
+        osc.connect(gain);
+        gain.gain.setValueAtTime(0.55, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.16);
+        osc.start(now);
+        osc.stop(now + 0.18);
+        break;
+      }
+      case 'ride': {
+        gain.gain.setValueAtTime(0.38, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.32);
+        const b = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.35, audioCtx.sampleRate);
+        const d = b.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (d.length * 3));
+        const src = audioCtx.createBufferSource();
+        src.buffer = b;
+        const f = audioCtx.createBiquadFilter();
+        f.type = 'bandpass';
+        f.frequency.value = 10000;
+        f.Q.value = 2;
+        src.connect(f);
+        f.connect(gain);
+        src.start(now);
+        src.stop(now + 0.35);
+        const osc2 = audioCtx.createOscillator();
+        osc2.type = 'sine';
+        osc2.frequency.value = 5800;
+        osc2.connect(gain);
+        osc2.start(now);
+        osc2.stop(now + 0.25);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  function triggerVisualsForDrum(drumIndex) {
+    initGPGPU();
+    const col = drumIndex % GRID_COLS;
+    const row = 1;
+    const pos = cellToPosition3D(col, row);
+    attractor.x = pos.x;
+    attractor.y = pos.y;
+    attractor.z = pos.z;
+    attractor.strength = 1.1;
+    attractor.col = col;
+    attractor.row = row;
+    activeProfile = KEY_PROFILES[col % KEY_PROFILES.length];
+    currentKeyHue = activeProfile.hue;
+    targetKaleidoFolds = activeProfile.folds;
+    targetKaleidoMix = 0.75;
+    tgtSpiral = activeProfile.spiral;
+    tgtGlitch = activeProfile.glitch;
+    tgtMirrorX = activeProfile.mx;
+    tgtMirrorY = activeProfile.my;
+    tgtWarp = activeProfile.warp;
+    tgtContrast = activeProfile.contrast;
+    burstRingTime = performance.now() * 0.001;
   }
 
   function createSynthVoice(midiNote, opts) {
@@ -1405,11 +1640,23 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
   function onKeyDown(e) {
     if (e.repeat) return;
     const key = e.code;
-    // Special keys: M=mic, P=arp, G=gyro
+    // Special keys: 1=mic, 2=arp, 3=gyro, 4=ambient
     if (key === 'Digit1') { toggleMic(); return; }
     if (key === 'Digit2') { toggleArp(); return; }
     if (key === 'Digit3') { initGyro(); return; }
     if (key === 'Digit4') { ambientMode ? stopAmbient() : startAmbient(); return; }
+    // Drum row: A–L, ;, '
+    const drumType = DRUM_KEYS[key];
+    if (drumType != null) {
+      e.preventDefault();
+      markUserAction();
+      initAudio();
+      initGPGPU();
+      playDrum(drumType);
+      const drumIndex = DRUM_KEY_ORDER.indexOf(key);
+      triggerVisualsForDrum(drumIndex >= 0 ? drumIndex : 0);
+      return;
+    }
     const midi = KEY_TO_NOTE[key];
     if (midi == null) return;
     e.preventDefault();

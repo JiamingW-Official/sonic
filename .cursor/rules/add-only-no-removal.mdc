@@ -1,0 +1,18 @@
+---
+description: Only add features and effects; never remove without explicit user permission
+alwaysApply: true
+---
+
+# Add-Only Policy for Sound Matrix / Sonic
+
+## Rule
+
+- **Only add** new functionality, visuals, or effects. Do not remove, simplify, or disable existing features or effects unless the user **explicitly allows or requests** removal.
+- If a change would remove, replace, or reduce an existing feature (e.g. a visual effect, interaction, mode, or audio behavior), either:
+  - Propose an additive alternative (e.g. add a new option while keeping the old behavior), or
+  - Ask: "This would remove [X]. Do you want me to remove it?"
+- Preserve all existing: keyboard/mouse/touch/gyro/head-tracking interactions, post-processing (kaleidoscope, bloom, glitch, mirror, warp, etc.), particle systems, KEY_PROFILES, ambient/arp/mic modes, and audio chain.
+
+## Rationale
+
+The project is a rich, feature-dense experience; removals can unintentionally strip intended behavior. Default to extending, not replacing.
