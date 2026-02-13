@@ -861,6 +861,131 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
   let detectionMethod = 'none';
   let headConfidence = 0;
 
+  // --- Gesture control (hand = virtual knobs; same camera as head) ---
+  let handX = 0.5;
+  let prevHandX = 0.5;
+  let handMotion = 0;
+  let handKnob1 = 0.5;   // 0..1, maps from hand X position (effect mix / warp)
+  let handKnob2 = 0;     // 0..1, maps from hand motion (bloom / intensity)
+  let fastSwipeTime = -1;
+  let fastSwipeDir = 0;  // -1 left, 1 right
+  const FAST_SWIPE_VEL = 0.22;
+  const FAST_SWIPE_DURATION = 0.45;
+  let prevHandFrameData = null;
+  let gestureBarEl = null;
+  let gestureFillEl = null;
+  let gestureLabelEl = null;
+  let gestureKnobLabelEl = null;
+
+  function createGestureBar() {
+    if (gestureBarEl && document.body.contains(gestureBarEl)) return;
+    gestureBarEl = document.createElement('div');
+    gestureBarEl.style.cssText = 'position:fixed;top:38px;left:50%;transform:translateX(-50%);width:160px;height:6px;z-index:1000;pointer-events:none;background:rgba(0,0,0,0.35);border-radius:3px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);opacity:0;transition:opacity 0.5s';
+    gestureFillEl = document.createElement('div');
+    gestureFillEl.style.cssText = 'position:absolute;left:0;top:0;height:100%;width:50%;background:linear-gradient(90deg,rgba(120,80,255,0.5),rgba(200,120,255,0.6));border-radius:2px;transition:width 0.08s ease-out';
+    gestureBarEl.appendChild(gestureFillEl);
+    const tick = document.createElement('div');
+    tick.style.cssText = 'position:absolute;left:50%;top:-2px;width:1px;height:10px;background:rgba(255,255,255,0.25);transform:translateX(-50%)';
+    gestureBarEl.appendChild(tick);
+    gestureLabelEl = document.createElement('div');
+    gestureLabelEl.style.cssText = 'position:fixed;top:48px;left:50%;transform:translateX(-50%);z-index:1000;pointer-events:none;font:600 8px/1 -apple-system,sans-serif;letter-spacing:2px;color:rgba(255,255,255,0.6);text-transform:uppercase;opacity:0;transition:opacity 0.5s';
+    gestureLabelEl.textContent = 'NORMAL';
+    gestureKnobLabelEl = document.createElement('div');
+    gestureKnobLabelEl.style.cssText = 'position:fixed;top:58px;left:50%;transform:translateX(-50%);z-index:1000;pointer-events:none;font:7px/1 monospace;color:rgba(255,255,255,0.35);opacity:0;transition:opacity 0.5s';
+    gestureKnobLabelEl.textContent = 'L← →R  ·  motion';
+    document.body.appendChild(gestureBarEl);
+    document.body.appendChild(gestureLabelEl);
+    document.body.appendChild(gestureKnobLabelEl);
+  }
+
+  function updateGestureBar() {
+    if (!gestureBarEl || !gestureFillEl || !gestureLabelEl) return;
+    const pct = Math.max(0, Math.min(100, handKnob1 * 100));
+    gestureFillEl.style.width = pct + '%';
+    const isFastSwipe = fastSwipeTime >= 0 && (performance.now() * 0.001 - fastSwipeTime) < FAST_SWIPE_DURATION;
+    if (isFastSwipe) {
+      gestureLabelEl.textContent = fastSwipeDir > 0 ? 'SWIPE →' : '← SWIPE';
+      gestureLabelEl.style.color = 'rgba(255,200,100,0.95)';
+    } else if (handMotion > 0.25) {
+      gestureLabelEl.textContent = 'ACTIVE';
+      gestureLabelEl.style.color = 'rgba(180,220,255,0.85)';
+    } else {
+      gestureLabelEl.textContent = 'NORMAL';
+      gestureLabelEl.style.color = 'rgba(255,255,255,0.6)';
+    }
+    gestureKnobLabelEl.textContent = 'L← knob →R  ·  motion ' + (handKnob2 * 100 | 0) + '%';
+  }
+
+  function detectHandGesture(data, cw, ch, hasPrev, prevData) {
+    const yStart = Math.floor(ch * 0.5);
+    const yEnd = ch;
+    const numCols = 16;
+    const colW = Math.floor(cw / numCols);
+    const colEnergy = new Float32Array(numCols);
+    const step = 2;
+    let totalMotion = 0;
+
+    for (let c = 0; c < numCols; c++) {
+      const x0 = c * colW;
+      const x1 = Math.min(x0 + colW, cw);
+      let energy = 0;
+      for (let y = yStart; y < yEnd; y += step) {
+        for (let x = x0; x < x1; x += step) {
+          const i = (y * cw + x) * 4;
+          const R = data[i], G = data[i+1], B = data[i+2];
+          if (x + step < x1 && y + step < yEnd) {
+            const j = (y * cw + x + step) * 4;
+            const k = ((y + step) * cw + x) * 4;
+            energy += Math.abs(R - data[j]) + Math.abs(G - data[j+1]) + Math.abs(B - data[j+2]);
+            energy += Math.abs(R - data[k]) + Math.abs(G - data[k+1]) + Math.abs(B - data[k+2]);
+          }
+          if (hasPrev && prevData) {
+            const m = (Math.abs(R - prevData[i]) + Math.abs(G - prevData[i+1]) + Math.abs(B - prevData[i+2])) * 2;
+            energy += m;
+            totalMotion += m;
+          }
+        }
+      }
+      colEnergy[c] = energy;
+    }
+
+    const smooth = new Float32Array(numCols);
+    for (let c = 0; c < numCols; c++) {
+      let s = colEnergy[c] * 2;
+      if (c > 0) s += colEnergy[c-1];
+      if (c < numCols-1) s += colEnergy[c+1];
+      smooth[c] = s;
+    }
+    let peakCol = numCols / 2;
+    let peakVal = 0;
+    for (let c = 0; c < numCols; c++) {
+      if (smooth[c] > peakVal) { peakVal = smooth[c]; peakCol = c; }
+    }
+    let wSum = 0, wTotal = 0;
+    for (let c = Math.max(0, peakCol - 3); c <= Math.min(numCols - 1, peakCol + 3); c++) {
+      wSum += smooth[c] * (c + 0.5);
+      wTotal += smooth[c];
+    }
+    const centroid = wTotal > 0 ? wSum / wTotal / numCols : 0.5;
+    const rawHandX = 1 - centroid;
+
+    const dt = 0.033;
+    const vel = (rawHandX - prevHandX) / dt;
+    if (Math.abs(vel) >= FAST_SWIPE_VEL) {
+      fastSwipeTime = performance.now() * 0.001;
+      fastSwipeDir = vel > 0 ? 1 : -1;
+    }
+    prevHandX = rawHandX;
+    handX += (rawHandX - handX) * 0.25;
+    handKnob1 = Math.max(0, Math.min(1, handX));
+
+    const motionNorm = Math.min(1, totalMotion / (numCols * 50));
+    handMotion += (motionNorm - handMotion) * 0.2;
+    handKnob2 = handMotion;
+
+    updateGestureBar();
+  }
+
   // --- Webcam head tracking (robust multi-strategy) ---
   function createHeadBar() {
     headBarEl = document.createElement('div');
@@ -913,6 +1038,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
   async function initHeadTracking() {
     if (headTrackingActive) return;
     createHeadBar();
+    createGestureBar();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user', frameRate: { ideal: 30 } },
@@ -950,10 +1076,12 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
       headBarEl.style.opacity = '1';
       headLabelEl.style.opacity = '1';
       headConfEl.style.opacity = '1';
+      if (gestureBarEl) { gestureBarEl.style.opacity = '1'; gestureLabelEl.style.opacity = '1'; gestureKnobLabelEl.style.opacity = '1'; }
       console.log('Head tracking: ' + detectionMethod);
     } catch (e) {
       console.warn('Camera access denied or unavailable:', e.message || e);
       if (headBarEl) { headBarEl.remove(); headLabelEl.remove(); headConfEl.remove(); }
+      if (gestureBarEl) { gestureBarEl.remove(); gestureLabelEl.remove(); gestureKnobLabelEl.remove(); }
     }
   }
 
@@ -971,6 +1099,10 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     let conf = 0;
 
     if (faceDetector) {
+      const data = headCtx.getImageData(0, 0, cw, ch).data;
+      detectHandGesture(data, cw, ch, !!prevFrameData, prevFrameData);
+      if (!prevFrameData) prevFrameData = new Uint8Array(data.length);
+      prevFrameData.set(data);
       faceDetector.detect(headCanvas).then(faces => {
         if (faces.length > 0) {
           const box = faces[0].boundingBox;
@@ -1026,6 +1158,9 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     // Save frame
     if (!prevFrameData) prevFrameData = new Uint8Array(data.length);
     prevFrameData.set(data);
+
+    // Hand gesture from bottom half of frame (virtual knobs + fast swipe)
+    detectHandGesture(data, cw, ch, hasPrev, prevFrameData);
 
     // Find peak energy cluster (the face is the biggest high-energy region)
     // Smooth the column energies to find a broad peak
@@ -1185,7 +1320,8 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     pingGain.connect(audioCtx.destination);
   }
 
-  // --- Modern 2020s-style procedural drums (kick, snare, 808, hat, clap, etc.) ---
+  // --- Modern 2020s-style procedural drums (not overwhelming; sit in mix) ---
+  const DRUM_GAIN = 0.5; // keep drums subtle so synth and ambient stay forward
   function playDrum(type) {
     if (!audioCtx || !masterGain) return;
     const now = audioCtx.currentTime;
@@ -1210,7 +1346,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
 
     switch (type) {
       case 'kick': {
-        gain.gain.setValueAtTime(0.85, now);
+        gain.gain.setValueAtTime(0.85 * DRUM_GAIN, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.28);
         noiseBurst(0.02, 200, 'highpass');
         const osc = audioCtx.createOscillator();
@@ -1230,7 +1366,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         body.frequency.setValueAtTime(180, now);
         body.frequency.exponentialRampToValueAtTime(80, now + 0.1);
         body.connect(gain);
-        gain.gain.setValueAtTime(0.6, now);
+        gain.gain.setValueAtTime(0.6 * DRUM_GAIN, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.14);
         body.start(now);
         body.stop(now + 0.15);
@@ -1243,8 +1379,8 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         osc.frequency.exponentialRampToValueAtTime(45, now + 0.06);
         osc.frequency.exponentialRampToValueAtTime(32, now + 0.5);
         osc.connect(gain);
-        gain.gain.setValueAtTime(0.75, now);
-        gain.gain.exponentialRampToValueAtTime(0.35, now + 0.05);
+        gain.gain.setValueAtTime(0.75 * DRUM_GAIN, now);
+        gain.gain.exponentialRampToValueAtTime(0.35 * DRUM_GAIN, now + 0.05);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.55);
         osc.start(now);
         osc.stop(now + 0.6);
@@ -1266,7 +1402,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
           src.start(t);
           src.stop(t + 0.06);
         }
-        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.setValueAtTime(0.5 * DRUM_GAIN, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
         break;
       }
@@ -1282,7 +1418,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         f.Q.value = 0.5;
         src.connect(f);
         f.connect(gain);
-        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.setValueAtTime(0.4 * DRUM_GAIN, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
         src.start(now);
         src.stop(now + 0.05);
@@ -1300,7 +1436,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         f.Q.value = 1;
         src.connect(f);
         f.connect(gain);
-        gain.gain.setValueAtTime(0.35, now);
+        gain.gain.setValueAtTime(0.35 * DRUM_GAIN, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
         src.start(now);
         src.stop(now + 0.2);
@@ -1312,7 +1448,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         osc.frequency.setValueAtTime(900, now);
         osc.frequency.exponentialRampToValueAtTime(400, now + 0.03);
         osc.connect(gain);
-        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.setValueAtTime(0.5 * DRUM_GAIN, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
         osc.start(now);
         osc.stop(now + 0.05);
@@ -1330,7 +1466,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         f.frequency.value = 1200;
         src.connect(f);
         f.connect(gain);
-        gain.gain.setValueAtTime(0.55, now);
+        gain.gain.setValueAtTime(0.55 * DRUM_GAIN, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.035);
         src.start(now);
         src.stop(now + 0.04);
@@ -1342,7 +1478,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         osc.frequency.setValueAtTime(100, now);
         osc.frequency.exponentialRampToValueAtTime(55, now + 0.15);
         osc.connect(gain);
-        gain.gain.setValueAtTime(0.6, now);
+        gain.gain.setValueAtTime(0.6 * DRUM_GAIN, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
         osc.start(now);
         osc.stop(now + 0.22);
@@ -1354,14 +1490,14 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         osc.frequency.setValueAtTime(160, now);
         osc.frequency.exponentialRampToValueAtTime(90, now + 0.12);
         osc.connect(gain);
-        gain.gain.setValueAtTime(0.55, now);
+        gain.gain.setValueAtTime(0.55 * DRUM_GAIN, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.16);
         osc.start(now);
         osc.stop(now + 0.18);
         break;
       }
       case 'ride': {
-        gain.gain.setValueAtTime(0.38, now);
+        gain.gain.setValueAtTime(0.38 * DRUM_GAIN, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.32);
         const b = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.35, audioCtx.sampleRate);
         const d = b.getChannelData(0);
@@ -1815,11 +1951,17 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     audioEnergy = (bassLevel * 0.5 + midLevel * 0.3 + trebleLevel * 0.2);
   }
 
-  // --- Microphone input → visuals ---
+  // --- Microphone → visuals: intuitive, smooth, gated ---
+  // Principle: time-domain RMS (loudness) → smoothed → gate (ignore room noise) → scales bloom/warp/particles.
+  // So: quiet = subtle glow, speaking/singing = gentle rise, loud = clear but not overwhelming.
   let micStream = null;
   let micAnalyser = null;
   let micData = null;
-  let micLevel = 0;
+  let micLevel = 0;           // raw RMS 0..1
+  let micLevelSmoothed = 0;   // lerped for smooth visuals
+  const MIC_SMOOTH = 0.11;    // lower = smoother response
+  const MIC_GATE = 0.012;     // below this = treat as silence (avoids room hiss driving UI)
+  const MIC_VISUAL_SCALE = 0.65; // 0..1 mapped to visual intensity (more intuitive range)
   let micEnabled = false;
 
   async function toggleMic() {
@@ -1835,7 +1977,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
       const src = audioCtx.createMediaStreamSource(micStream);
       micAnalyser = audioCtx.createAnalyser();
       micAnalyser.fftSize = 256;
-      micAnalyser.smoothingTimeConstant = 0.8;
+      micAnalyser.smoothingTimeConstant = 0.75;
       micData = new Uint8Array(micAnalyser.frequencyBinCount);
       src.connect(micAnalyser);
       micEnabled = true;
@@ -1848,7 +1990,10 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     micAnalyser.getByteTimeDomainData(micData);
     let sum = 0;
     for (let i = 0; i < micData.length; i++) { const v = (micData[i] - 128) / 128; sum += v * v; }
-    micLevel = Math.sqrt(sum / micData.length);
+    const raw = Math.sqrt(sum / micData.length);
+    const gated = raw < MIC_GATE ? 0 : raw;
+    micLevel = gated;
+    micLevelSmoothed += (micLevel - micLevelSmoothed) * MIC_SMOOTH;
   }
 
   // --- Device gyroscope (mobile tilt) ---
@@ -1911,23 +2056,26 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     }, stepMs);
   }
 
-  // --- Ambient generative mode (auto-plays when idle) ---
+  // --- Ambient generative mode: subtle, responsive to user input ---
+  // When idle long enough, very soft notes fade in; any key/drum/click stops it so you stay in control.
   let ambientMode = false;
   let ambientTimer = null;
   let lastUserAction = 0;
-  const AMBIENT_DELAY = 15000; // 15s idle → ambient starts
+  const AMBIENT_DELAY = 22000; // 22s idle before ambient starts; any key/drum/click stops it (input-responsive)
   const AMBIENT_SCALES = [
     [0, 2, 4, 7, 9],       // pentatonic major
-    [0, 3, 5, 7, 10],      // pentatonic minor
-    [0, 2, 3, 5, 7, 8, 10],// dorian
-    [0, 2, 4, 5, 7, 9, 11],// ionian
+    [0, 3, 5, 7, 10],     // pentatonic minor
+    [0, 2, 3, 5, 7, 8, 10], // dorian
+    [0, 2, 4, 5, 7, 9, 11], // ionian
   ];
   let ambientScale = AMBIENT_SCALES[0];
   let ambientRoot = 60;
+  let ambientNoteCount = 0; // first notes softer (fade-in)
 
   function startAmbient() {
     if (ambientMode) return;
     ambientMode = true;
+    ambientNoteCount = 0;
     showModeToast('Ambient ON');
     ambientScale = AMBIENT_SCALES[Math.floor(Math.random() * AMBIENT_SCALES.length)];
     ambientRoot = 48 + Math.floor(Math.random() * 24);
@@ -1942,19 +2090,21 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
 
   function ambientStep() {
     if (!ambientMode || !audioCtx) return;
-    // Play a random note from the scale
+    // Subtle: very low velocity, gentle fade-in over first few notes
+    ambientNoteCount++;
+    const fadeIn = Math.min(1, ambientNoteCount / 6);
+    const velBase = 0.055 + Math.random() * 0.06;
+    const velocity = velBase * fadeIn;
     const degree = ambientScale[Math.floor(Math.random() * ambientScale.length)];
     const octave = Math.floor(Math.random() * 2) * 12;
     const note = ambientRoot + degree + octave;
-    createSynthVoice(note, { sustained: Math.random() > 0.4, velocity: 0.15 + Math.random() * 0.2 });
+    createSynthVoice(note, { sustained: Math.random() > 0.55, velocity });
     triggerVisualsForMidi(note);
-    // Occasionally play a chord
-    if (Math.random() > 0.65) {
+    if (Math.random() > 0.82) {
       const d2 = ambientScale[(ambientScale.indexOf(degree) + 2) % ambientScale.length];
-      createSynthVoice(ambientRoot + d2 + octave, { sustained: false, velocity: 0.12 });
+      createSynthVoice(ambientRoot + d2 + octave, { sustained: false, velocity: velocity * 0.7 });
     }
-    // Next step: variable rhythm
-    const nextMs = 300 + Math.random() * 800;
+    const nextMs = 600 + Math.random() * 1200;
     ambientTimer = setTimeout(ambientStep, nextMs);
   }
 
@@ -2044,6 +2194,12 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
   document.addEventListener('touchend', onTouchEnd);
 
   let time = 0;
+  // ─── Visual & mic responsive mechanism (see RESPONSIVE.md for full doc) ───
+  // (1) Keys/drums → attractor position + KEY_PROFILES (per-key hue, kaleido, glitch, warp, etc.) → particle pull + post FX.
+  // (2) Master output analyser → bass/mid/treble/audioEnergy → bloom, warp, spiral, glitch, particle strength.
+  // (3) Mic (time-domain RMS, smoothed, gated) → micVisual → bloom, warp, chromatic offset, particle attractor (subtle).
+  // (4) Mouse/touch velocity → touchIntensity → warp, spiral, glitch. Head tracking → camera yaw + kaleido rotation.
+  // (5) Chord (multiple keys) → blend KEY_PROFILES; 3+ keys = sparkle; 5+ = pad swell. All lerped for smooth transitions.
   function animate() {
     requestAnimationFrame(animate);
     if (!renderer || !scene || !camera) return;
@@ -2077,8 +2233,9 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     }
 
     const dblFlash = Math.max(0, 1 - (now - lastDoubleTap) / 0.4);
-    // Audio-reactive intensity boost
-    const audioBoost = audioEnergy * 0.6 + micLevel * 1.5;
+    // Mic: smoothed + gated, scaled for intuitive visual range (not overwhelming)
+    const micVisual = micLevelSmoothed * MIC_VISUAL_SCALE;
+    const audioBoost = audioEnergy * 0.6 + micVisual * 0.9;
     const bassHit = bassLevel > 0.4 ? (bassLevel - 0.4) * 2.5 : 0;
 
     // Distortion interpolation — Endel-style: smoother, calmer transitions
@@ -2095,15 +2252,23 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
       targetKaleidoMix = Math.max(0.1, targetKaleidoMix * 0.998);
       tgtGlitch *= 0.995; tgtSpiral *= 0.995; tgtWarp *= 0.995;
     }
-    // Head tracking → prism Z-axis tilt (NOT spinning — rocking left/right)
     detectHeadPosition();
     const headOffset = headX - 0.5;
     headOffset_g = headOffset;
 
+    // Gesture: hand = virtual knobs; fast swipe = one-shot burst
+    const fastSwipeActive = fastSwipeTime >= 0 && (now - fastSwipeTime) < FAST_SWIPE_DURATION;
+    if (fastSwipeActive) sparkleTime = now;
+    const gestureWarp = handKnob1 * 0.4;       // hand L→R = warp amount
+    const gestureBloom = handKnob2 * 0.5;      // hand motion = bloom lift
+    const gestureSpiral = handKnob2 * 0.25;   // motion = spiral
+    const gestureGlitch = fastSwipeActive ? 0.7 : 0;
+    const gestureKaleidoBias = (handKnob1 - 0.5) * 0.06; // hand position tilts kaleido
+
     // Kaleidoscope UV angle: Endel-style gentle breathe
     const breathe = 0.015 * Math.sin(now * 0.15);
     const keyPush = attractor.strength > 0.05 ? 0.04 * Math.sin(now * 1.8) * attractor.strength : 0;
-    const targetRotation = breathe + keyPush;
+    const targetRotation = breathe + keyPush + gestureKaleidoBias;
     kaleidoRotation += (targetRotation - kaleidoRotation) * 0.08;
 
     // Head → Y-axis yaw: Endel-style smooth, subtle pan
@@ -2127,7 +2292,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         attractor.strength *= 0.92;
         velocityVariable.material.uniforms.time.value = now;
         velocityVariable.material.uniforms.attractor.value.set(attractor.x, attractor.y, attractor.z);
-        velocityVariable.material.uniforms.attractorStrength.value = attractor.strength + bassHit * 0.8 + micLevel * 0.6;
+        velocityVariable.material.uniforms.attractorStrength.value = attractor.strength + bassHit * 0.8 + micVisual * 0.5;
         velocityVariable.material.uniforms.attractorCol.value = attractor.col != null ? attractor.col : 0;
         velocityVariable.material.uniforms.attractorRow.value = attractor.row != null ? attractor.row : 1;
         gpuCompute.compute();
@@ -2385,6 +2550,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
 
     if (Math.floor(now * 6) % 1 === 0) updateHud();
     updateKeyDisplay();
+    if (headTrackingActive) updateGestureBar();
 
     try {
       if (postQuad && rtScene) {
@@ -2394,13 +2560,13 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         pu.kaleidoFolds.value = currentKaleidoFolds;
         pu.kaleidoRotation.value = kaleidoRotation;
         pu.kaleidoMix.value = kaleidoMix;
-        pu.chromaticOffset.value = activeProfile.ca + touchIntensity * 0.005 + dblFlash * 0.008 + bassHit * 0.006 + micLevel * 0.008;
+        pu.chromaticOffset.value = activeProfile.ca + touchIntensity * 0.005 + dblFlash * 0.008 + bassHit * 0.006 + micVisual * 0.006;
         const focusBreath = keysPressed.size === 0 ? 0.04 * Math.sin(now * 0.1) : 0;
-        pu.bloomStrength.value = activeProfile.bloom + dblFlash * 1.5 + touchIntensity * 0.5 + audioBoost * 1.0 + micLevel * 2.0 + focusBreath;
-        pu.spiralAmt.value = curSpiral + touchIntensity * 0.2 + trebleLevel * 0.3;
-        pu.glitchAmt.value = curGlitch + dblFlash * 0.5 + bassHit * 0.4;
+        pu.bloomStrength.value = activeProfile.bloom + dblFlash * 1.5 + touchIntensity * 0.5 + audioBoost * 1.0 + micVisual * 0.85 + focusBreath + gestureBloom;
+        pu.spiralAmt.value = curSpiral + touchIntensity * 0.2 + trebleLevel * 0.3 + gestureSpiral;
+        pu.glitchAmt.value = curGlitch + dblFlash * 0.5 + bassHit * 0.4 + gestureGlitch;
         pu.mirrorXY.value.set(curMirrorX, curMirrorY);
-        pu.warpAmt.value = curWarp + touchIntensity * 0.15 + midLevel * 0.2 + micLevel * 0.4;
+        pu.warpAmt.value = curWarp + touchIntensity * 0.15 + midLevel * 0.2 + micVisual * 0.28 + gestureWarp;
         pu.contrastBoost.value = curContrast + dblFlash * 0.4 + bassHit * 0.3;
         renderer.setRenderTarget(rtScene);
         renderer.render(scene, camera);
