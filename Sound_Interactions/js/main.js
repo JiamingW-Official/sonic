@@ -215,6 +215,10 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         kaleidoRotation: { value: 0.0 },
         kaleidoMix: { value: 0.15 },
         spiralAmt: { value: 0.0 },
+        flowAmt: { value: 0.0 },
+        pulseAmt: { value: 0.0 },
+        shearAmt: { value: 0.0 },
+        waveAmt: { value: 0.0 },
         glitchAmt: { value: 0.0 },
         mirrorXY: { value: new THREE.Vector2(0, 0) },
         warpAmt: { value: 0.0 },
@@ -234,6 +238,10 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         uniform float kaleidoRotation;
         uniform float kaleidoMix;
         uniform float spiralAmt;
+        uniform float flowAmt;
+        uniform float pulseAmt;
+        uniform float shearAmt;
+        uniform float waveAmt;
         uniform float glitchAmt;
         uniform vec2 mirrorXY;
         uniform float warpAmt;
@@ -281,6 +289,20 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         vec3 distortWithEdge(vec2 uv){
           vec2 c=uv-0.5; float r=length(c); float a=atan(c.y,c.x);
           float edge=0.0;
+
+          // Flow: linear drift (not spiral) — stronger toward edges
+          c+=flowAmt*vec2(sin(time*0.4)*0.04,cos(time*0.37)*0.03)*(0.2+r);
+          r=length(c); a=atan(c.y,c.x);
+          // Pulse: radial breathe in/out
+          c*=1.0+pulseAmt*0.08*sin(time*1.2)*r;
+          r=length(c); a=atan(c.y,c.x);
+          // Shear: skew that evolves (lattice / parallelogram)
+          float sx=shearAmt*0.18*sin(time*0.7); float sy=shearAmt*0.12*cos(time*0.9);
+          c=vec2(c.x+c.y*sx,c.y+c.x*sy);
+          r=length(c); a=atan(c.y,c.x);
+          // Wave: sine displacement (ripple, not rotation)
+          c+=waveAmt*vec2(sin(c.y*20.0+time*2.0)*0.02*r,sin(c.x*18.0+time*1.7)*0.02*r);
+          r=length(c); a=atan(c.y,c.x);
 
           // Spiral twist with turbulence
           float spiralT=spiralAmt*(r*6.0+time*0.5+0.3*sin(r*8.0-time*2.0));
@@ -881,27 +903,29 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
   let targetKaleidoMix = 0.15;
   let kaleidoRotation = 0;
   let curSpiral = 0, tgtSpiral = 0;
+  let curFlow = 0, tgtFlow = 0;
+  let curPulse = 0, tgtPulse = 0;
+  let curShear = 0, tgtShear = 0;
+  let curWave = 0, tgtWave = 0;
   let curGlitch = 0, tgtGlitch = 0;
   let curMirrorX = 0, tgtMirrorX = 0;
   let curMirrorY = 0, tgtMirrorY = 0;
   let curWarp = 0, tgtWarp = 0;
   let curContrast = 1.0, tgtContrast = 1.0;
-  // Each key: unique distortion combo (folds, spiral, glitch, mirror, warp, contrast, colors)
-  // MAX contrast between adjacent keys: opposite hues, opposite distortion types
-  // Each key = strongly distinct world: one dominant effect, opposite hues/contrast between neighbours
+  // Each key: unique distortion combo — spiral/flow/pulse/shear/wave for motion variety (not all spiral)
   const KEY_PROFILES = [
-    { folds:8,  hue:0.0,   bloom:2.8, ca:0.012, spiral:0,   glitch:0,   mx:0, my:0, warp:0,   contrast:1.85 }, // 0: RED — crystal kaleido, warm blast
-    { folds:0,  hue:0.52,  bloom:0.9, ca:0.002, spiral:0,   glitch:2.2, mx:0, my:0, warp:0.2, contrast:2.1  }, // 1: CYAN — pure glitch, cold shatter
-    { folds:4,  hue:0.32,  bloom:2.2, ca:0.007, spiral:1.6, glitch:0,   mx:0, my:0, warp:0,   contrast:1.15 }, // 2: GREEN — spiral flow, organic
-    { folds:24, hue:0.04,  bloom:3.2, ca:0.016, spiral:0,   glitch:0,   mx:0, my:0, warp:0,   contrast:1.9  }, // 3: WHITE — diamond kaleido overload
-    { folds:0,  hue:0.86,  bloom:0.7, ca:0.003, spiral:0,   glitch:0,   mx:1, my:1, warp:1.6, contrast:2.25 }, // 4: MAGENTA — mirror + warp only, dark
-    { folds:12, hue:0.48,  bloom:2.4, ca:0.01,  spiral:0.5, glitch:0,   mx:0, my:0, warp:0,   contrast:1.35 }, // 5: TEAL — geometric kaleido
-    { folds:0,  hue:0.1,   bloom:1.2, ca:0.004, spiral:0,   glitch:2.0, mx:0, my:0, warp:0.8, contrast:2.0  }, // 6: ORANGE — glitch + warp, aggressive
-    { folds:6,  hue:0.7,   bloom:2.6, ca:0.009, spiral:0,   glitch:0,   mx:1, my:0, warp:0,   contrast:1.25 }, // 7: PURPLE — mirror kaleido, symmetric
-    { folds:28, hue:0.92,  bloom:3.4, ca:0.018, spiral:0.3, glitch:0,   mx:0, my:0, warp:0,   contrast:1.65 }, // 8: PINK — mega prismatic
-    { folds:0,  hue:0.4,   bloom:0.6, ca:0.002, spiral:0,   glitch:1.0, mx:1, my:1, warp:0,   contrast:2.4  }, // 9: LIME — mirror glitch, minimal
-    { folds:10, hue:0.58, bloom:2.5, ca:0.011, spiral:0,   glitch:0,   mx:0, my:0, warp:1.8, contrast:1.5  }, // 10: BLUE — warp dominant, deep
-    { folds:0,  hue:0.18,  bloom:1.8, ca:0.006, spiral:1.5, glitch:0.7, mx:1, my:0, warp:0,   contrast:1.95 }, // 11: GOLD — spiral+glitch chaos
+    { folds:8,  hue:0.0,   bloom:2.8, ca:0.012, spiral:0,   flow:0.9,  pulse:0,   shear:0,   wave:0,   glitch:0,   mx:0, my:0, warp:0,   contrast:1.85 }, // 0: RED — drift flow
+    { folds:0,  hue:0.52,  bloom:0.9, ca:0.002, spiral:0,   flow:0,   pulse:0,   shear:0.8, wave:0,   glitch:2.2, mx:0, my:0, warp:0.2, contrast:2.1  }, // 1: CYAN — shear + glitch
+    { folds:4,  hue:0.32,  bloom:2.2, ca:0.007, spiral:1.6, flow:0,   pulse:0,   shear:0,   wave:0,   glitch:0,   mx:0, my:0, warp:0,   contrast:1.15 }, // 2: GREEN — spiral
+    { folds:24, hue:0.04,  bloom:3.2, ca:0.016, spiral:0,   flow:0,   pulse:0.7, shear:0,   wave:0,   glitch:0,   mx:0, my:0, warp:0,   contrast:1.9  }, // 3: WHITE — pulse breathe
+    { folds:0,  hue:0.86,  bloom:0.7, ca:0.003, spiral:0,   flow:0,   pulse:0,   shear:0,   wave:0.6, glitch:0,   mx:1, my:1, warp:1.6, contrast:2.25 }, // 4: MAGENTA — wave + mirror + warp
+    { folds:12, hue:0.48,  bloom:2.4, ca:0.01,  spiral:0.5, flow:0.4, pulse:0,   shear:0,   wave:0.3, glitch:0,   mx:0, my:0, warp:0,   contrast:1.35 }, // 5: TEAL — spiral + flow + wave
+    { folds:0,  hue:0.1,   bloom:1.2, ca:0.004, spiral:0,   flow:0.6, pulse:0.4, shear:0.2, wave:0,   glitch:2.0, mx:0, my:0, warp:0.8, contrast:2.0  }, // 6: ORANGE — flow+pulse+shear+glitch
+    { folds:6,  hue:0.7,   bloom:2.6, ca:0.009, spiral:0,   flow:0,   pulse:0.5, shear:0.6, wave:0,   glitch:0,   mx:1, my:0, warp:0,   contrast:1.25 }, // 7: PURPLE — pulse + shear + mirror
+    { folds:28, hue:0.92,  bloom:3.4, ca:0.018, spiral:0.3, flow:0.3, pulse:0.2, shear:0,   wave:0.5, glitch:0,   mx:0, my:0, warp:0,   contrast:1.65 }, // 8: PINK — mixed motion
+    { folds:0,  hue:0.4,   bloom:0.6, ca:0.002, spiral:0,   flow:0.8, pulse:0,   shear:0.4, wave:0,   glitch:1.0, mx:1, my:1, warp:0,   contrast:2.4  }, // 9: LIME — flow + shear
+    { folds:10, hue:0.58, bloom:2.5, ca:0.011, spiral:0,   flow:0,   pulse:0.9, shear:0,   wave:0.4, glitch:0,   mx:0, my:0, warp:1.8, contrast:1.5  }, // 10: BLUE — pulse + wave + warp
+    { folds:0,  hue:0.18,  bloom:1.8, ca:0.006, spiral:1.5, flow:0.2, pulse:0,   shear:0.3, wave:0.6, glitch:0.7, mx:1, my:0, warp:0,   contrast:1.95 }, // 11: GOLD — spiral+wave+shear
   ];
   let activeProfile = KEY_PROFILES[0];
   // Head tracking state
@@ -1602,6 +1626,10 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     targetKaleidoFolds = activeProfile.folds;
     targetKaleidoMix = 0.75;
     tgtSpiral = activeProfile.spiral;
+    tgtFlow = activeProfile.flow ?? 0;
+    tgtPulse = activeProfile.pulse ?? 0;
+    tgtShear = activeProfile.shear ?? 0;
+    tgtWave = activeProfile.wave ?? 0;
     tgtGlitch = activeProfile.glitch;
     tgtMirrorX = activeProfile.mx;
     tgtMirrorY = activeProfile.my;
@@ -1722,6 +1750,10 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     targetKaleidoFolds = activeProfile.folds;
     targetKaleidoMix = 0.88;
     tgtSpiral = activeProfile.spiral;
+    tgtFlow = activeProfile.flow ?? 0;
+    tgtPulse = activeProfile.pulse ?? 0;
+    tgtShear = activeProfile.shear ?? 0;
+    tgtWave = activeProfile.wave ?? 0;
     tgtGlitch = activeProfile.glitch;
     tgtMirrorX = activeProfile.mx;
     tgtMirrorY = activeProfile.my;
@@ -1745,6 +1777,10 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     targetKaleidoFolds = activeProfile.folds;
     targetKaleidoMix = 0.88;
     tgtSpiral = activeProfile.spiral;
+    tgtFlow = activeProfile.flow ?? 0;
+    tgtPulse = activeProfile.pulse ?? 0;
+    tgtShear = activeProfile.shear ?? 0;
+    tgtWave = activeProfile.wave ?? 0;
     tgtGlitch = activeProfile.glitch;
     tgtMirrorX = activeProfile.mx;
     tgtMirrorY = activeProfile.my;
@@ -1977,14 +2013,18 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
       });
       if (activeProfiles.length >= 2) {
         // Weighted average of all active profiles
-        let bFolds=0, bBloom=0, bCa=0, bSpiral=0, bGlitch=0, bWarp=0, bContrast=0, bHue=0;
+        let bFolds=0, bBloom=0, bCa=0, bSpiral=0, bFlow=0, bPulse=0, bShear=0, bWave=0, bGlitch=0, bWarp=0, bContrast=0, bHue=0;
         let bMx=0, bMy=0;
         const w = 1 / activeProfiles.length;
         activeProfiles.forEach(p => {
           bFolds += p.folds * w;
           bBloom += p.bloom * w;
           bCa += p.ca * w;
-          bSpiral += p.spiral * w;
+          bSpiral += (p.spiral || 0) * w;
+          bFlow += (p.flow || 0) * w;
+          bPulse += (p.pulse || 0) * w;
+          bShear += (p.shear || 0) * w;
+          bWave += (p.wave || 0) * w;
           bGlitch += p.glitch * w;
           bWarp += p.warp * w;
           bContrast += p.contrast * w;
@@ -1997,6 +2037,10 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         targetKaleidoFolds = bFolds;
         targetKaleidoMix = Math.min(1, 0.88 + (n - 1) * 0.04);
         tgtSpiral = bSpiral * chordBoost;
+        tgtFlow = bFlow * chordBoost;
+        tgtPulse = bPulse * chordBoost;
+        tgtShear = bShear * chordBoost;
+        tgtWave = bWave * chordBoost;
         tgtGlitch = bGlitch * chordBoost;
         tgtMirrorX = bMx;
         tgtMirrorY = bMy;
@@ -2428,6 +2472,10 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     currentKaleidoFolds += (targetKaleidoFolds - currentKaleidoFolds) * lerpRate;
     kaleidoMix += (targetKaleidoMix - kaleidoMix) * 0.08;
     curSpiral += (tgtSpiral - curSpiral) * 0.11;
+    curFlow += (tgtFlow - curFlow) * 0.11;
+    curPulse += (tgtPulse - curPulse) * 0.11;
+    curShear += (tgtShear - curShear) * 0.11;
+    curWave += (tgtWave - curWave) * 0.11;
     curGlitch += (tgtGlitch - curGlitch) * 0.12;
     curMirrorX += (tgtMirrorX - curMirrorX) * 0.13;
     curMirrorY += (tgtMirrorY - curMirrorY) * 0.13;
@@ -2435,7 +2483,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     curContrast += (tgtContrast - curContrast) * 0.11;
     if (now >= visualFreezeUntil && attractor.strength < 0.05) {
       targetKaleidoMix = Math.max(0.1, targetKaleidoMix * 0.998);
-      tgtGlitch *= 0.995; tgtSpiral *= 0.995; tgtWarp *= 0.995;
+      tgtGlitch *= 0.995; tgtSpiral *= 0.995; tgtFlow *= 0.995; tgtPulse *= 0.995; tgtShear *= 0.995; tgtWave *= 0.995; tgtWarp *= 0.995;
     }
     detectHeadPosition();
     const headOffset = headX - 0.5;
@@ -2562,19 +2610,22 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
       const posAttr = radiatingParticles.geometry.attributes.position;
       const arr = posAttr.array;
       const base = radiatingParticles.userData.basePos;
-      // Curved spiraling rays with varying lengths when active
+      const motionStyle = (attractor.col || 0) % 4; // 0=spiral, 1=linear, 2=zigzag, 3=fan
       for (let i = 0; i < RADIATE_COUNT; i++) {
         const isActiveRay = isKeyActive;
-        const curl = radiateOn ? 0.4 * Math.sin(colPhase * 2 + i * 0.5) : 0.05;
-        const stretch = isActiveRay ? 1.85 + 0.75 * Math.sin(colPhase * 1.5 + i * 0.7) : 0.9;
-        const bend = radiateOn ? 0.25 * Math.sin(i * 1.3 + colPhase) : 0;
+        let curl = radiateOn ? 0.4 * Math.sin(colPhase * 2 + i * 0.5) : 0.05;
+        let stretch = isActiveRay ? 1.85 + 0.75 * Math.sin(colPhase * 1.5 + i * 0.7) : 0.9;
+        let bend = radiateOn ? 0.25 * Math.sin(i * 1.3 + colPhase) : 0;
+        if (motionStyle === 1) { curl = 0.02; bend = 0; stretch *= 1.1; } // linear rays
         for (let k = 0; k < RADIATE_POINTS_PER_RAY; k++) {
           const idx = (i * RADIATE_POINTS_PER_RAY + k) * 3;
           const t = k / RADIATE_POINTS_PER_RAY;
+          const zigzagBend = (motionStyle === 2 && radiateOn) ? 0.35 * (i % 2 === 0 ? 1 : -1) * Math.sin(t * 12 + now * 3) * t : 0;
           const curlAngle = curl * t * 3;
           const bx = base[idx], bz = base[idx+2];
           const cosC = Math.cos(curlAngle), sinC = Math.sin(curlAngle);
-          arr[idx]   = (bx * cosC - bz * sinC) * stretch + bend * t + 0.05 * Math.sin(colPhase + k);
+          const fanSpread = motionStyle === 3 && radiateOn ? 0.15 * Math.sin(now * 2 + i * 0.8) * t : 0;
+          arr[idx]   = (bx * cosC - bz * sinC) * stretch + bend * t + zigzagBend + fanSpread + 0.05 * Math.sin(colPhase + k);
           arr[idx+1] = base[idx+1] + 0.07 * t * Math.sin(colPhase * 1.2 + i + k * 0.2) + bend * t * 0.5;
           arr[idx+2] = (bx * sinC + bz * cosC) * stretch + 0.05 * Math.cos(colPhase * 1.1 + k);
         }
@@ -2592,23 +2643,32 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
       const posAttr = speedLineParticles.geometry.attributes.position;
       const arr = posAttr.array;
       const base = speedLineParticles.userData.basePos;
-      // Crossing diagonal lines + shatter when active
+      const speedMotion = (attractor.col || 0) % 4;
       for (let i = 0; i < arr.length; i += 3) {
         const lineIdx = Math.floor((i / 3) / SPEED_POINTS_PER_LINE);
         const ptIdx = (i / 3) % SPEED_POINTS_PER_LINE;
         const t = ptIdx / SPEED_POINTS_PER_LINE;
-        const diag = (lineIdx % 2 === 0) ? 1 : -1;  // alternating diagonal direction
+        const diag = (lineIdx % 2 === 0) ? 1 : -1;
         const m = speedOn ? 2.0 : 0.5;
         const phase = now * (3 + lineIdx * 0.15) + lineIdx * 0.4;
-        // Diagonal crossing pattern
         arr[i]   = base[i] + 0.5 * m * Math.sin(phase) + diag * t * 0.15 * m;
         arr[i+1] = base[i+1] + diag * t * 0.2 * m + 0.12 * m * Math.cos(now * 3 + i * 0.01);
         arr[i+2] = base[i+2] + 0.25 * m * Math.sin(now * 1.5 + base[i+2] * 2);
-        // Explosive scatter when active
+        // Perpendicular wave (ribbon) for style 1/2; pulse bands for style 3
         if (speedOn) {
           const scatter = 0.08 * Math.sin(now * 5 + i * 0.3) * (1 - t);
           arr[i] += scatter;
           arr[i+1] += scatter * 0.7;
+          if (speedMotion === 1) {
+            arr[i+1] += 0.06 * m * Math.sin(t * 25 + now * 4);
+            arr[i+2] += 0.04 * m * Math.cos(t * 20 + now * 3);
+          } else if (speedMotion === 2) {
+            arr[i] += 0.05 * m * Math.sin(t * 30 + now * 5) * (1 - t);
+            arr[i+2] += 0.05 * m * Math.cos(t * 22 + now * 4) * (1 - t);
+          } else if (speedMotion === 3) {
+            const band = Math.floor(t * 8) * 0.5 + now * 2;
+            arr[i+1] += 0.04 * m * Math.sin(band) * (1 - t);
+          }
         }
       }
       posAttr.needsUpdate = true;
@@ -2670,20 +2730,42 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
       const posAttr = plasmaParticles.geometry.attributes.position;
       const arr = posAttr.array;
       const off = plasmaParticles.userData.baseOffsets;
-      // Fractal tendrils: particles trace outward in branching paths when active
+      // Motion style by key: 0=spiral tendril, 1=linear burst, 2=figure-8, 3=noise drift
+      const plasmaMotion = (attractor.col || 0) % 4;
       const sc = 0.7 + str * 1.4 + (plasmaOn ? 0.5 * Math.sin(now * 2.2) : 0);
       for (let i = 0; i < PLASMA_POINTS; i++) {
-        const branch = Math.floor(i / 40); // ~30 branches
+        const branch = Math.floor(i / 40);
         const branchT = (i % 40) / 40;
-        const branchAngle = branch * 2.39996 + now * 0.3; // golden angle separation
+        const branchAngle = branch * 2.39996 + now * 0.3;
         if (plasmaOn) {
-          // Tendril: outward spiral with branching
           const radius = branchT * 0.6 * sc;
-          const twist = branchT * 3 + now * 2 + branch * 0.7;
           const jitter = 0.04 * Math.sin(i * 7.3 + now * 4);
-          arr[i*3]   = attractor.x + Math.cos(branchAngle + twist) * radius + jitter;
-          arr[i*3+1] = attractor.y + branchT * 0.3 * Math.sin(now * 1.5 + branch) + off[i*3+1] * 0.3;
-          arr[i*3+2] = attractor.z + Math.sin(branchAngle + twist) * radius + jitter * 0.7;
+          if (plasmaMotion === 0) {
+            const twist = branchT * 3 + now * 2 + branch * 0.7;
+            arr[i*3]   = attractor.x + Math.cos(branchAngle + twist) * radius + jitter;
+            arr[i*3+1] = attractor.y + branchT * 0.3 * Math.sin(now * 1.5 + branch) + off[i*3+1] * 0.3;
+            arr[i*3+2] = attractor.z + Math.sin(branchAngle + twist) * radius + jitter * 0.7;
+          } else if (plasmaMotion === 1) {
+            // Linear outward: no twist, straight rays
+            arr[i*3]   = attractor.x + Math.cos(branchAngle) * radius + jitter * 0.5;
+            arr[i*3+1] = attractor.y + branchT * 0.25 + off[i*3+1] * 0.2;
+            arr[i*3+2] = attractor.z + Math.sin(branchAngle) * radius + jitter * 0.5;
+          } else if (plasmaMotion === 2) {
+            // Figure-8 (Lissajous) in XZ
+            const liss = now * 1.2 + branch * 0.5;
+            const lx = Math.sin(liss) * radius * 0.8;
+            const lz = Math.sin(liss * 2 + 0.7) * radius * 0.6;
+            arr[i*3]   = attractor.x + lx + Math.cos(branchAngle) * branchT * 0.2;
+            arr[i*3+1] = attractor.y + branchT * 0.2 * Math.sin(now + branch);
+            arr[i*3+2] = attractor.z + lz + Math.sin(branchAngle) * branchT * 0.2;
+          } else {
+            // Noise drift: slow drift per branch
+            const drift = 0.08 * Math.sin(now * 0.8 + branch * 1.7) * branchT;
+            const twist = branchT * 2 + now * 0.8;
+            arr[i*3]   = attractor.x + Math.cos(branchAngle + twist) * radius * 0.7 + drift + off[i*3] * 0.2;
+            arr[i*3+1] = attractor.y + branchT * 0.2 + 0.05 * Math.sin(now * 1.1 + branch * 2);
+            arr[i*3+2] = attractor.z + Math.sin(branchAngle + twist) * radius * 0.7 + drift * 0.7 + off[i*3+2] * 0.2;
+          }
         } else {
           arr[i*3]   = attractor.x + off[i*3] * sc * 0.5 + 0.015 * Math.sin(now * 1.5 + i);
           arr[i*3+1] = attractor.y + off[i*3+1] * sc * 0.5 + 0.015 * Math.cos(now * 1.3 + i);
@@ -2751,6 +2833,10 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         pu.textureLayerMix.value = idleIntensity;
         pu.bloomStrength.value = activeProfile.bloom + dblFlash * 1.5 + touchIntensity * 0.5 + audioBoost * 1.0 + micVisual * 0.85 + focusBreath + idleBreath + gestureBloom;
         pu.spiralAmt.value = curSpiral + touchIntensity * 0.2 + trebleLevel * 0.3 + gestureSpiral;
+        pu.flowAmt.value = curFlow + touchIntensity * 0.12;
+        pu.pulseAmt.value = curPulse + midLevel * 0.15;
+        pu.shearAmt.value = curShear + touchIntensity * 0.1;
+        pu.waveAmt.value = curWave + trebleLevel * 0.2;
         pu.glitchAmt.value = curGlitch + dblFlash * 0.5 + bassHit * 0.4 + gestureGlitch;
         pu.mirrorXY.value.set(curMirrorX, curMirrorY);
         pu.warpAmt.value = curWarp + touchIntensity * 0.15 + midLevel * 0.2 + micVisual * 0.28 + gestureWarp;
