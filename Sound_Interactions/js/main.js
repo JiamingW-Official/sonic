@@ -140,11 +140,11 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
           float n3=fbm(vec2(angle*1.5+t,d*4.0-t*0.5));
           float aurora=sin(c.y*14.0+t*4.0+sin(c.x*5.0+t*2.0)*3.0)*0.5+0.5;
           aurora*=smoothstep(0.55,0.0,abs(c.y-0.08*sin(t*3.0+c.x*6.0)));
-          vec3 col1=hsl(activeHue,0.65,0.07)*n1;
-          vec3 col2=hsl(activeHue+0.3,0.55,0.06)*n2;
-          vec3 col3=hsl(activeHue+0.6,0.6,0.05)*n3;
-          vec3 auroraCol=hsl(activeHue+0.15,0.75,0.1)*aurora;
-          vec3 base=vec3(0.025,0.012,0.055);
+          vec3 col1=hsl(activeHue,0.78,0.09)*n1;
+          vec3 col2=hsl(activeHue+0.32,0.7,0.08)*n2;
+          vec3 col3=hsl(activeHue+0.58,0.72,0.07)*n3;
+          vec3 auroraCol=hsl(activeHue+0.12,0.85,0.14)*aurora;
+          vec3 base=vec3(0.02,0.01,0.05);
           vec3 col=base+col1+col2+col3+auroraCol;
           col*=mix(1.0,0.25,smoothstep(0.0,0.9,d));
           float star1=step(0.997,hash(floor(vUv*350.0)));
@@ -218,7 +218,8 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         glitchAmt: { value: 0.0 },
         mirrorXY: { value: new THREE.Vector2(0, 0) },
         warpAmt: { value: 0.0 },
-        contrastBoost: { value: 1.0 }
+        contrastBoost: { value: 1.0 },
+        textureLayerMix: { value: 0.0 }
       },
       vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
       fragmentShader: `
@@ -237,6 +238,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         uniform vec2 mirrorXY;
         uniform float warpAmt;
         uniform float contrastBoost;
+        uniform float textureLayerMix;
         varying vec2 vUv;
 
         float hash(float n){ return fract(sin(n)*43758.5453); }
@@ -440,6 +442,50 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
           // Color inversion flash at high contrast (psychedelic)
           float invFlash=smoothstep(1.8,2.2,contrastBoost)*0.15;
           col=mix(col,1.0-col,invFlash*sin(time*4.0+l*6.0)*0.5+invFlash*0.5);
+
+          // --- Subtle texture layers (contour, map, glyph, architecture) — only when textureLayerMix>0 ---
+          if(textureLayerMix>0.005){
+            vec2 c=uv-0.5; float r=length(c); float a=atan(c.y,c.x);
+            float contour=0.0;
+            vec2 f80=floor(uv*80.0+time*0.02);
+            vec2 f40=floor(uv*40.0-time*0.01);
+            float nElev=hash2(f80)+0.5*hash2(f40);
+            float elev=sin(r*25.0+nElev*6.28)*0.5+0.5;
+            contour+=(1.0-smoothstep(0.0,0.02,abs(fract(elev*12.0)-0.5)))*0.5;
+            contour+=(1.0-smoothstep(0.0,0.015,abs(fract(r*18.0+sin(a*3.0)*2.0)-0.5)))*0.35;
+            col+=contour*vec3(0.45,0.5,0.55)*textureLayerMix*0.06;
+
+            float grid=0.0;
+            vec2 g=uv*resolution.xy*0.12;
+            float radialFade=1.0-smoothstep(0.2,0.5,r);
+            grid+=(1.0-smoothstep(0.0,0.08,abs(fract(g.x)-0.5)))*radialFade;
+            grid+=(1.0-smoothstep(0.0,0.08,abs(fract(g.y)-0.5)))*radialFade;
+            col+=grid*vec3(0.35,0.4,0.45)*textureLayerMix*0.05;
+
+            float glyph=0.0;
+            vec2 cellOff=hash2v(vec2(floor(time*0.5),0.0))*10.0;
+            vec2 cell=floor(uv*vec2(32.0,18.0)+cellOff);
+            float gx=hash2(cell); float gy=hash2(cell+vec2(1.0,0.0));
+            vec2 local=fract(uv*vec2(32.0,18.0)+cellOff)-0.5;
+            if(gx>0.92) glyph+=(1.0-smoothstep(0.02,0.04,abs(local.x)))*(1.0-smoothstep(0.05,0.15,abs(local.y)));
+            if(gy>0.94) glyph+=1.0-smoothstep(0.01,0.03,length(local-vec2(0.1,0)));
+            col+=glyph*vec3(0.4,0.45,0.5)*textureLayerMix*0.055;
+
+            float arch=0.0;
+            vec2 vp=vec2(0.5+0.12*sin(time*0.2),0.48);
+            vec2 toC=uv-vp;
+            for(float i=0.0;i<6.0;i+=1.0){
+              float ang=i*0.33+time*0.05;
+              vec2 rayDir=vec2(cos(ang),sin(ang));
+              float distToRay=abs(toC.x*rayDir.y-toC.y*rayDir.x);
+              float along=dot(toC,rayDir);
+              float rayLine=1.0-smoothstep(0.0,0.006,distToRay);
+              float rayAlong=smoothstep(0.0,0.05,along);
+              float rayRadial=1.0-smoothstep(0.5,0.95,r*2.0);
+              arch+=rayLine*rayAlong*rayRadial;
+            }
+            col+=arch*vec3(0.38,0.42,0.48)*textureLayerMix*0.05;
+          }
 
           // Film grain + scanlines
           float grain=(hash2(uv*vec2(time*90.0,time*73.0))-0.5)*0.03;
@@ -810,6 +856,20 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
   let masterGain = null;
   const keysPressed = new Set();
   const sustainedVoices = new Map();
+  let sustainPedalHeld = false;
+  let visualFreezeUntil = 0;
+  let masterVolume = 0.4;
+  let helpOverlayEl = null;
+  let helpOverlayVisible = false;
+  // Idle auto-play: build → hold → decay (capped, no infinite stack)
+  let idlePhase = 'rest';
+  let idleIntensity = 0;
+  let idleTimer = 0;
+  const IDLE_REST_SEC = 2.5;
+  const IDLE_BUILD_RATE = 0.018;
+  const IDLE_CAP = 0.38;
+  const IDLE_HOLD_SEC = 5;
+  const IDLE_DECAY_RATE = 0.022;
   // Per-key / sparkle / pad visual state (Y2K reactive)
   let currentKeyHue = 0.55;
   let sparkleTime = 0;
@@ -828,19 +888,20 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
   let curContrast = 1.0, tgtContrast = 1.0;
   // Each key: unique distortion combo (folds, spiral, glitch, mirror, warp, contrast, colors)
   // MAX contrast between adjacent keys: opposite hues, opposite distortion types
+  // Each key = strongly distinct world: one dominant effect, opposite hues/contrast between neighbours
   const KEY_PROFILES = [
-    { folds:6,  hue:0.0,  bloom:2.4, ca:0.008, spiral:0,   glitch:0,   mx:0, my:0, warp:0,   contrast:1.6 }, // 0: RED crystal — warm, high bloom
-    { folds:0,  hue:0.55, bloom:1.2, ca:0.003, spiral:0,   glitch:1.4, mx:0, my:0, warp:0.3, contrast:1.8 }, // 1: CYAN glitch — cold, dark, broken
-    { folds:3,  hue:0.28, bloom:1.8, ca:0.006, spiral:0.9, glitch:0,   mx:0, my:0, warp:0,   contrast:1.1 }, // 2: GREEN spiral — organic, flowing
-    { folds:16, hue:0.08, bloom:2.8, ca:0.01,  spiral:0,   glitch:0,   mx:0, my:0, warp:0,   contrast:1.7 }, // 3: WHITE diamond — blinding, crystalline
-    { folds:0,  hue:0.83, bloom:1.0, ca:0.004, spiral:0,   glitch:0,   mx:1, my:1, warp:1.2, contrast:2.0 }, // 4: MAGENTA mirror — dark, warped, extreme
-    { folds:8,  hue:0.45, bloom:2.0, ca:0.007, spiral:0.4, glitch:0,   mx:0, my:0, warp:0,   contrast:1.3 }, // 5: TEAL kaleido — calm, geometric
-    { folds:0,  hue:0.12, bloom:1.4, ca:0.005, spiral:0,   glitch:1.6, mx:0, my:0, warp:0.6, contrast:1.9 }, // 6: ORANGE glitch — aggressive, broken
-    { folds:5,  hue:0.72, bloom:2.2, ca:0.008, spiral:0,   glitch:0,   mx:1, my:0, warp:0,   contrast:1.2 }, // 7: PURPLE mirror — elegant, symmetric
-    { folds:20, hue:0.95, bloom:3.0, ca:0.012, spiral:0.2, glitch:0,   mx:0, my:0, warp:0,   contrast:1.5 }, // 8: PINK mega — overwhelming, prismatic
-    { folds:0,  hue:0.38, bloom:0.8, ca:0.003, spiral:0,   glitch:0.8, mx:1, my:1, warp:0,   contrast:2.2 }, // 9: LIME mirror — stark, minimal, high contrast
-    { folds:7,  hue:0.62, bloom:2.5, ca:0.009, spiral:0,   glitch:0,   mx:0, my:0, warp:1.4, contrast:1.4 }, // 10: BLUE warp — deep, immersive, bending
-    { folds:0,  hue:0.17, bloom:1.6, ca:0.006, spiral:1.2, glitch:0.5, mx:1, my:0, warp:0,   contrast:1.7 }, // 11: GOLD spiral+glitch — chaotic, rich
+    { folds:8,  hue:0.0,   bloom:2.8, ca:0.012, spiral:0,   glitch:0,   mx:0, my:0, warp:0,   contrast:1.85 }, // 0: RED — crystal kaleido, warm blast
+    { folds:0,  hue:0.52,  bloom:0.9, ca:0.002, spiral:0,   glitch:2.2, mx:0, my:0, warp:0.2, contrast:2.1  }, // 1: CYAN — pure glitch, cold shatter
+    { folds:4,  hue:0.32,  bloom:2.2, ca:0.007, spiral:1.6, glitch:0,   mx:0, my:0, warp:0,   contrast:1.15 }, // 2: GREEN — spiral flow, organic
+    { folds:24, hue:0.04,  bloom:3.2, ca:0.016, spiral:0,   glitch:0,   mx:0, my:0, warp:0,   contrast:1.9  }, // 3: WHITE — diamond kaleido overload
+    { folds:0,  hue:0.86,  bloom:0.7, ca:0.003, spiral:0,   glitch:0,   mx:1, my:1, warp:1.6, contrast:2.25 }, // 4: MAGENTA — mirror + warp only, dark
+    { folds:12, hue:0.48,  bloom:2.4, ca:0.01,  spiral:0.5, glitch:0,   mx:0, my:0, warp:0,   contrast:1.35 }, // 5: TEAL — geometric kaleido
+    { folds:0,  hue:0.1,   bloom:1.2, ca:0.004, spiral:0,   glitch:2.0, mx:0, my:0, warp:0.8, contrast:2.0  }, // 6: ORANGE — glitch + warp, aggressive
+    { folds:6,  hue:0.7,   bloom:2.6, ca:0.009, spiral:0,   glitch:0,   mx:1, my:0, warp:0,   contrast:1.25 }, // 7: PURPLE — mirror kaleido, symmetric
+    { folds:28, hue:0.92,  bloom:3.4, ca:0.018, spiral:0.3, glitch:0,   mx:0, my:0, warp:0,   contrast:1.65 }, // 8: PINK — mega prismatic
+    { folds:0,  hue:0.4,   bloom:0.6, ca:0.002, spiral:0,   glitch:1.0, mx:1, my:1, warp:0,   contrast:2.4  }, // 9: LIME — mirror glitch, minimal
+    { folds:10, hue:0.58, bloom:2.5, ca:0.011, spiral:0,   glitch:0,   mx:0, my:0, warp:1.8, contrast:1.5  }, // 10: BLUE — warp dominant, deep
+    { folds:0,  hue:0.18,  bloom:1.8, ca:0.006, spiral:1.5, glitch:0.7, mx:1, my:0, warp:0,   contrast:1.95 }, // 11: GOLD — spiral+glitch chaos
   ];
   let activeProfile = KEY_PROFILES[0];
   // Head tracking state
@@ -1254,7 +1315,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     compressor.release.value = 0.15;
 
     masterGain = audioCtx.createGain();
-    masterGain.gain.value = 0.4;
+    masterGain.gain.value = masterVolume;
     masterGain.connect(compressor);
 
     // Stereo widener: two delays panned L/R
@@ -1705,12 +1766,56 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     const modes = [];
     modes.push('[1] mic ' + (micEnabled ? 'ON' : 'off'));
     modes.push('[2] arp ' + (arpEnabled ? 'ON' : 'off'));
-    modes.push('[3] gyro ' + (gyroEnabled ? 'ON' : 'off'));
+    modes.push('[3] cam ' + (gyroEnabled ? 'ON' : 'off'));
     modes.push('[4] ambient ' + (ambientMode ? 'ON' : 'off'));
+    if (sustainPedalHeld) modes.push('sustain');
+    if (performance.now() * 0.001 < visualFreezeUntil) modes.push('freeze');
+    modes.push('vol ' + (masterVolume * 100 | 0) + '%');
     if (audioEnergy > 0.01) modes.push('audio ' + (audioEnergy * 100 | 0) + '%');
     if (micLevel > 0.01) modes.push('mic ' + (micLevel * 100 | 0) + '%');
     if (chordCount > 1) modes.push('chord ×' + chordCount);
     hudEl.innerHTML = modes.join(' &nbsp;·&nbsp; ');
+  }
+
+  function createHelpOverlay() {
+    if (helpOverlayEl) return;
+    helpOverlayEl = document.createElement('div');
+    helpOverlayEl.setAttribute('role', 'dialog');
+    helpOverlayEl.setAttribute('aria-label', 'Shortcuts');
+    helpOverlayEl.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.82);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;padding:24px;opacity:0;visibility:hidden;transition:opacity 0.25s,visibility 0.25s;pointer-events:none';
+    helpOverlayEl.innerHTML = `
+      <div style="max-width:360px;font:11px/1.6 'SF Pro Text',system-ui,sans-serif;color:rgba(255,255,255,0.9);letter-spacing:0.03em;">
+        <div style="font-weight:600;margin-bottom:12px;font-size:13px;">Sound Matrix · 快捷键</div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 20px;">
+          <span style="color:rgba(255,255,255,0.5)">A–L ; '</span><span>鼓组</span>
+          <span style="color:rgba(255,255,255,0.5)">Z–M</span><span>低八度合成器</span>
+          <span style="color:rgba(255,255,255,0.5)">Q–P [ ]</span><span>中/高八度</span>
+          <span style="color:rgba(255,255,255,0.5)">Shift + 键</span><span>高八度</span>
+          <span style="color:rgba(255,255,255,0.5)">Space</span><span>延音踏板（按住）</span>
+          <span style="color:rgba(255,255,255,0.5)">1–4</span><span>麦克风 / 琶音 / 摄像头 / 环境</span>
+          <span style="color:rgba(255,255,255,0.5)">5</span><span>视觉冻结 2 秒</span>
+          <span style="color:rgba(255,255,255,0.5)">− =</span><span>主音量减 / 加</span>
+          <span style="color:rgba(255,255,255,0.5)">Esc</span><span>停止延音 + 重置缩放</span>
+          <span style="color:rgba(255,255,255,0.5)">?</span><span>本帮助</span>
+          <span style="color:rgba(255,255,255,0.5)">滚轮</span><span>缩放</span>
+          <span style="color:rgba(255,255,255,0.5)">双击</span><span>爆炸效果</span>
+        </div>
+        <div style="margin-top:14px;font-size:10px;color:rgba(255,255,255,0.4)">? 或 Esc 关闭</div>
+      </div>`;
+    document.body.appendChild(helpOverlayEl);
+  }
+
+  function toggleHelp() {
+    createHelpOverlay();
+    helpOverlayVisible = !helpOverlayVisible;
+    helpOverlayEl.style.opacity = helpOverlayVisible ? '1' : '0';
+    helpOverlayEl.style.visibility = helpOverlayVisible ? 'visible' : 'hidden';
+    helpOverlayEl.style.pointerEvents = helpOverlayVisible ? 'auto' : 'none';
+  }
+
+  function stopAllSustained() {
+    sustainedVoices.forEach(stop => { try { stop(); } catch (_) {} });
+    sustainedVoices.clear();
   }
 
   let introHintHidden = false;
@@ -1776,11 +1881,59 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
   function onKeyDown(e) {
     if (e.repeat) return;
     const key = e.code;
-    // Special keys: 1=mic, 2=arp, 3=gyro, 4=ambient
+
+    // Help overlay: ? or Shift+/
+    if (e.key === '?' || (key === 'Slash' && e.shiftKey)) {
+      e.preventDefault();
+      toggleHelp();
+      return;
+    }
+    if (key === 'Escape') {
+      e.preventDefault();
+      if (helpOverlayVisible) { toggleHelp(); return; }
+      stopAllSustained();
+      zoomLevel = 1.0;
+      showModeToast('Sustain off · zoom reset');
+      return;
+    }
+
+    // Sustain pedal (Space)
+    if (key === 'Space') {
+      e.preventDefault();
+      sustainPedalHeld = true;
+      return;
+    }
+
+    // Visual freeze (5)
+    if (key === 'Digit5') {
+      e.preventDefault();
+      visualFreezeUntil = performance.now() * 0.001 + 2;
+      showModeToast('Freeze 2s');
+      return;
+    }
+
+    // Master volume − =
+    if (key === 'Minus') {
+      e.preventDefault();
+      masterVolume = Math.max(0.05, masterVolume - 0.08);
+      if (masterGain) masterGain.gain.value = masterVolume;
+      showModeToast('Vol ' + (masterVolume * 100 | 0) + '%');
+      return;
+    }
+    if (key === 'Equal' || key === 'NumpadAdd') {
+      e.preventDefault();
+      masterVolume = Math.min(1, masterVolume + 0.08);
+      if (masterGain) masterGain.gain.value = masterVolume;
+      showModeToast('Vol ' + (masterVolume * 100 | 0) + '%');
+      return;
+    }
+
+    // Mode keys: 1=mic, 2=arp, 3=camera, 4=ambient
     if (key === 'Digit1') { toggleMic(); return; }
     if (key === 'Digit2') { toggleArp(); return; }
     if (key === 'Digit3') { initGyro(); return; }
     if (key === 'Digit4') { ambientMode ? stopAmbient() : startAmbient(); return; }
+
     // Drum row: A–L, ;, '
     const drumType = DRUM_KEYS[key];
     if (drumType != null) {
@@ -1793,17 +1946,21 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
       triggerVisualsForDrum(drumIndex >= 0 ? drumIndex : 0);
       return;
     }
+
     const midi = KEY_TO_NOTE[key];
     if (midi == null) return;
     e.preventDefault();
     markUserAction();
     if (keysPressed.has(key)) return;
     keysPressed.add(key);
-    if (isSustainNote(midi)) {
-      const voice = playNote(midi, true);
+    const octaveUp = e.shiftKey ? 12 : 0;
+    const midiPlay = Math.min(127, midi + octaveUp);
+    const asSustained = sustainPedalHeld || isSustainNote(midi);
+    if (asSustained) {
+      const voice = playNote(midiPlay, true);
       if (voice) sustainedVoices.set(key, voice.stop);
-    } else playNote(midi, false);
-    triggerVisualsForMidi(midi);
+    } else playNote(midiPlay, false);
+    triggerVisualsForMidi(midiPlay);
     const n = keysPressed.size;
     chordCount = n;
 
@@ -1864,6 +2021,11 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
 
   function onKeyUp(e) {
     const key = e.code;
+    if (key === 'Space') {
+      e.preventDefault();
+      sustainPedalHeld = false;
+      return;
+    }
     if (KEY_TO_NOTE[key] == null) return;
     e.preventDefault();
     keysPressed.delete(key);
@@ -2212,6 +2374,29 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     mouseVelocity *= 0.9;
     touchIntensity = Math.min(1, mouseVelocity / 50);
 
+    // Idle auto-play: build → hold → decay (capped so no infinite stacking / lag)
+    const isIdle = keysPressed.size === 0 && attractor.strength < 0.06;
+    const dt = 1 / 60;
+    if (!isIdle) {
+      idlePhase = 'rest';
+      idleIntensity *= 0.92;
+      idleTimer = 0;
+    } else {
+      if (idlePhase === 'rest') {
+        idleTimer += dt;
+        if (idleTimer >= IDLE_REST_SEC) { idlePhase = 'build'; idleTimer = 0; }
+      } else if (idlePhase === 'build') {
+        idleIntensity = Math.min(IDLE_CAP, idleIntensity + IDLE_BUILD_RATE);
+        if (idleIntensity >= IDLE_CAP) { idlePhase = 'hold'; idleTimer = 0; }
+      } else if (idlePhase === 'hold') {
+        idleTimer += dt;
+        if (idleTimer >= IDLE_HOLD_SEC) idlePhase = 'decay';
+      } else if (idlePhase === 'decay') {
+        idleIntensity = Math.max(0, idleIntensity - IDLE_DECAY_RATE);
+        if (idleIntensity <= 0) { idlePhase = 'rest'; idleTimer = 0; }
+      }
+    }
+
     // Audio analyzer → bass/mid/treble levels
     updateAudioLevels();
     updateMicLevel();
@@ -2238,17 +2423,17 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     const audioBoost = audioEnergy * 0.6 + micVisual * 0.9;
     const bassHit = bassLevel > 0.4 ? (bassLevel - 0.4) * 2.5 : 0;
 
-    // Distortion interpolation — Endel-style: smoother, calmer transitions
-    const lerpRate = 0.07;
+    // Distortion interpolation — distinct per-key: slightly snappier so contrast is felt
+    const lerpRate = 0.095;
     currentKaleidoFolds += (targetKaleidoFolds - currentKaleidoFolds) * lerpRate;
-    kaleidoMix += (targetKaleidoMix - kaleidoMix) * 0.06;
-    curSpiral += (tgtSpiral - curSpiral) * 0.08;
-    curGlitch += (tgtGlitch - curGlitch) * 0.09;
-    curMirrorX += (tgtMirrorX - curMirrorX) * 0.1;
-    curMirrorY += (tgtMirrorY - curMirrorY) * 0.1;
-    curWarp += (tgtWarp - curWarp) * 0.08;
-    curContrast += (tgtContrast - curContrast) * 0.08;
-    if (attractor.strength < 0.05) {
+    kaleidoMix += (targetKaleidoMix - kaleidoMix) * 0.08;
+    curSpiral += (tgtSpiral - curSpiral) * 0.11;
+    curGlitch += (tgtGlitch - curGlitch) * 0.12;
+    curMirrorX += (tgtMirrorX - curMirrorX) * 0.13;
+    curMirrorY += (tgtMirrorY - curMirrorY) * 0.13;
+    curWarp += (tgtWarp - curWarp) * 0.11;
+    curContrast += (tgtContrast - curContrast) * 0.11;
+    if (now >= visualFreezeUntil && attractor.strength < 0.05) {
       targetKaleidoMix = Math.max(0.1, targetKaleidoMix * 0.998);
       tgtGlitch *= 0.995; tgtSpiral *= 0.995; tgtWarp *= 0.995;
     }
@@ -2268,7 +2453,8 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     // Kaleidoscope UV angle: Endel-style gentle breathe
     const breathe = 0.015 * Math.sin(now * 0.15);
     const keyPush = attractor.strength > 0.05 ? 0.04 * Math.sin(now * 1.8) * attractor.strength : 0;
-    const targetRotation = breathe + keyPush + gestureKaleidoBias;
+    const idleKaleido = idleIntensity * 0.025 * Math.sin(now * 0.2);
+    const targetRotation = breathe + keyPush + gestureKaleidoBias + idleKaleido;
     kaleidoRotation += (targetRotation - kaleidoRotation) * 0.08;
 
     // Head → Y-axis yaw: Endel-style smooth, subtle pan
@@ -2289,7 +2475,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
 
     if (useGPGPU && gpuCompute && positionVariable && velocityVariable && particlePoints) {
       try {
-        attractor.strength *= 0.92;
+        if (now >= visualFreezeUntil) attractor.strength *= 0.92;
         velocityVariable.material.uniforms.time.value = now;
         velocityVariable.material.uniforms.attractor.value.set(attractor.x, attractor.y, attractor.z);
         velocityVariable.material.uniforms.attractorStrength.value = attractor.strength + bassHit * 0.8 + micVisual * 0.5;
@@ -2312,34 +2498,35 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     const str = Math.min(1, attractor.strength);
     const isKeyActive = str > 0.05;
     const keyHue = (activeCol / SPECTRUM_BAR_COUNT) * 0.75 + 0.4;
+    // Per-key distinct scenes: each column drives different layer combo for clear contrast
+    const colPhase = activeCol * 0.6 + now * 0.5;
     const on = (cols) => isKeyActive && cols.includes(activeCol);
-    const tunnelOn = on([0, 8]);
-    const verticalOn = on([1, 8, 9]);
+    const tunnelOn = on([0, 5, 8]);
+    const verticalOn = on([1, 5, 9]);
     const centralOn = on([2, 9]);
-    const radiateOn = on([3, 9]);
+    const radiateOn = on([3, 8]);
     const speedOn = on([4, 10]);
-    const plasmaOn = on([6, 10]);
+    const plasmaOn = on([6, 10, 11]);
     const floatOn = on([7, 11]);
 
     if (tunnelParticles && tunnelParticles.geometry) {
       const posAttr = tunnelParticles.geometry.attributes.position;
       const arr = posAttr.array;
       const base = tunnelParticles.userData.basePos;
-      // Asymmetric: rectangular distortion + shear when active
+      const m = tunnelOn ? 2.2 : 0.5;
       for (let i = 0; i < arr.length; i += 3) {
         const j = i / 3;
-        const m = tunnelOn ? 2.0 : 0.6;
         const bx = base[i], by = base[i+1], bz = base[i+2];
-        const shear = tunnelOn ? 0.15 * Math.sin(bz * 1.5 + now * 2) : 0;
-        const squash = 1 + (tunnelOn ? 0.3 * Math.sin(now * 1.5 + j * 0.02) : 0);
-        arr[i]   = bx * squash + 0.25 * m * Math.sin(now * 2 + j * 0.03) + shear;
-        arr[i+1] = by / squash + 0.22 * m * Math.cos(now * 1.7 + j * 0.04 + bz * 0.5) + shear * 0.5;
-        arr[i+2] = bz + 0.3 * m * Math.sin(now * 1.2 + bz * 0.6) + (tunnelOn ? 0.2 * Math.cos(now * 3 + j * 0.01) : 0);
+        const shear = tunnelOn ? 0.2 * Math.sin(bz * 1.5 + colPhase * 2) : 0;
+        const squash = 1 + (tunnelOn ? 0.35 * Math.sin(colPhase * 1.2 + j * 0.02) : 0);
+        arr[i]   = bx * squash + 0.28 * m * Math.sin(colPhase + j * 0.03) + shear;
+        arr[i+1] = by / squash + 0.25 * m * Math.cos(colPhase * 1.1 + j * 0.04 + bz * 0.5) + shear * 0.5;
+        arr[i+2] = bz + 0.35 * m * Math.sin(colPhase * 0.9 + bz * 0.6) + (tunnelOn ? 0.25 * Math.cos(colPhase * 2 + j * 0.01) : 0);
       }
       posAttr.needsUpdate = true;
-      tunnelParticles.material.opacity = tunnelOn ? (0.92 + 0.3 * Math.sin(now * 1.5) + str * 0.3) : 0.06;
-      tunnelParticles.material.color.setHSL(currentKeyHue, 0.95, tunnelOn ? 0.88 : 0.4);
-      tunnelParticles.material.size = 0.003 + (tunnelOn ? 0.002 * Math.abs(Math.sin(now * 3)) : 0);
+      tunnelParticles.material.opacity = tunnelOn ? (0.95 + 0.35 * Math.sin(colPhase) + str * 0.35) : 0.03;
+      tunnelParticles.material.color.setHSL(currentKeyHue, 0.95, tunnelOn ? 0.9 : 0.35);
+      tunnelParticles.material.size = 0.003 + (tunnelOn ? 0.0025 * Math.abs(Math.sin(colPhase * 2)) : 0);
     }
 
     if (centralColumnParticles && centralColumnParticles.geometry) {
@@ -2366,7 +2553,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         }
       }
       posAttr.needsUpdate = true;
-      centralColumnParticles.material.opacity = centralOn ? (0.95 + sustainGlow + padLevel * 0.4) : 0.08;
+      centralColumnParticles.material.opacity = centralOn ? (0.96 + sustainGlow + padLevel * 0.45) : 0.03;
       centralColumnParticles.material.color.setHSL(currentKeyHue + 0.1, 0.95, centralOn ? 0.92 : 0.4);
       centralColumnParticles.material.size = centralOn ? 0.004 + 0.002 * Math.abs(Math.sin(now * 4)) : 0.002;
     }
@@ -2378,24 +2565,23 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
       // Curved spiraling rays with varying lengths when active
       for (let i = 0; i < RADIATE_COUNT; i++) {
         const isActiveRay = isKeyActive;
-        const curl = radiateOn ? 0.35 * Math.sin(now * 2.5 + i * 0.5) : 0.05;
-        const stretch = isActiveRay ? 1.8 + 0.7 * Math.sin(now * 3 + i * 0.7) : 0.9;
-        const bend = radiateOn ? 0.2 * Math.sin(i * 1.3 + now * 1.5) : 0;
+        const curl = radiateOn ? 0.4 * Math.sin(colPhase * 2 + i * 0.5) : 0.05;
+        const stretch = isActiveRay ? 1.85 + 0.75 * Math.sin(colPhase * 1.5 + i * 0.7) : 0.9;
+        const bend = radiateOn ? 0.25 * Math.sin(i * 1.3 + colPhase) : 0;
         for (let k = 0; k < RADIATE_POINTS_PER_RAY; k++) {
           const idx = (i * RADIATE_POINTS_PER_RAY + k) * 3;
           const t = k / RADIATE_POINTS_PER_RAY;
-          // Spiral deviation: rays curve outward
           const curlAngle = curl * t * 3;
           const bx = base[idx], bz = base[idx+2];
           const cosC = Math.cos(curlAngle), sinC = Math.sin(curlAngle);
-          arr[idx]   = (bx * cosC - bz * sinC) * stretch + bend * t + 0.04 * Math.sin(now * 2.5 + k);
-          arr[idx+1] = base[idx+1] + 0.06 * t * Math.sin(now * 2 + i + k * 0.2) + bend * t * 0.5;
-          arr[idx+2] = (bx * sinC + bz * cosC) * stretch + 0.04 * Math.cos(now * 2.2 + k);
+          arr[idx]   = (bx * cosC - bz * sinC) * stretch + bend * t + 0.05 * Math.sin(colPhase + k);
+          arr[idx+1] = base[idx+1] + 0.07 * t * Math.sin(colPhase * 1.2 + i + k * 0.2) + bend * t * 0.5;
+          arr[idx+2] = (bx * sinC + bz * cosC) * stretch + 0.05 * Math.cos(colPhase * 1.1 + k);
         }
       }
       posAttr.needsUpdate = true;
-      radiatingParticles.material.opacity = radiateOn ? (0.9 + str * 0.35) : 0.08;
-      radiatingParticles.material.size = 0.0024 + (radiateOn ? 0.0016 * Math.abs(Math.sin(now * 2.5)) : 0);
+      radiatingParticles.material.opacity = radiateOn ? (0.92 + str * 0.4) : 0.03;
+      radiatingParticles.material.size = 0.0026 + (radiateOn ? 0.0018 * Math.abs(Math.sin(colPhase * 2)) : 0);
     }
 
     if (boxWireframe && boxWireframe.material) {
@@ -2426,7 +2612,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         }
       }
       posAttr.needsUpdate = true;
-      speedLineParticles.material.opacity = speedOn ? (0.92 + 0.3 * Math.sin(now * 1.5) + str * 0.3) : 0.07;
+      speedLineParticles.material.opacity = speedOn ? (0.94 + 0.35 * Math.sin(colPhase) + str * 0.35) : 0.03;
       speedLineParticles.material.color.setHSL(currentKeyHue + 0.15, 0.95, speedOn ? 0.88 : 0.4);
       speedLineParticles.material.size = 0.002 + (speedOn ? 0.0015 * Math.abs(Math.sin(now * 3)) : 0);
     }
@@ -2439,24 +2625,23 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
       for (let c = 0; c < SPECTRUM_BAR_COUNT; c++) {
         const isActive = c === activeCol && isKeyActive;
         const baseX = ((c + 0.5) / SPECTRUM_BAR_COUNT) * 2.8 - 1.4;
-        const lean = isActive ? 0.15 * Math.sin(now * 3 + c) : 0;
-        const explode = isActive ? 0.08 : 0;
+        const lean = isActive ? 0.18 * Math.sin(colPhase * 2 + c) : 0;
+        const explode = isActive ? 0.1 : 0;
         for (let v = 0; v < VERT_COL_POINTS; v++) {
           const i = c * VERT_COL_POINTS + v;
           const t = v / (VERT_COL_POINTS - 1);
           const baseY = t * 1.6 - 0.8;
-          const phase = c * 0.65 + v * 0.04 + now * 1.8;
-          // Irregular wave + lean + scatter
-          const waveAmp = isActive ? 0.55 + 0.2 * Math.sin(now * 2.5 + c) : 0.15;
-          const scatter = explode * Math.sin(v * 3.3 + now * 5) * (0.5 + 0.5 * Math.sin(v * 0.7));
-          arr[i*3]   = baseX + lean * t + 0.03 * Math.sin(now * 2.2 + c + v * 0.04) + scatter;
-          arr[i*3+1] = baseY + waveAmp * Math.sin(phase) + 0.1 * Math.sin(now * 1.8 + v * 0.08 + c * 0.9);
-          arr[i*3+2] = -1.0 + 0.04 * Math.sin(now * 1.5 + c) + scatter * 0.6;
+          const phase = c * 0.65 + v * 0.04 + colPhase * 1.5;
+          const waveAmp = isActive ? 0.6 + 0.25 * Math.sin(colPhase + c) : 0.12;
+          const scatter = explode * Math.sin(v * 3.3 + colPhase * 3) * (0.5 + 0.5 * Math.sin(v * 0.7));
+          arr[i*3]   = baseX + lean * t + 0.035 * Math.sin(colPhase + c + v * 0.04) + scatter;
+          arr[i*3+1] = baseY + waveAmp * Math.sin(phase) + 0.12 * Math.sin(colPhase * 1.2 + v * 0.08 + c * 0.9);
+          arr[i*3+2] = -1.0 + 0.05 * Math.sin(colPhase + c) + scatter * 0.6;
         }
       }
       posAttr.needsUpdate = true;
-      colPts.material.opacity = verticalOn ? (0.9 + str * 0.4) : 0.08;
-      colPts.material.size = 0.0028 + (verticalOn ? 0.0014 * Math.abs(Math.sin(now * 2.5)) : 0) + (isKeyActive ? 0.001 : 0);
+      colPts.material.opacity = verticalOn ? (0.92 + str * 0.45) : 0.03;
+      colPts.material.size = 0.0028 + (verticalOn ? 0.0016 * Math.abs(Math.sin(colPhase * 2)) : 0) + (isKeyActive ? 0.001 : 0);
     }
 
     if (burstRingParticles && burstRingParticles.geometry) {
@@ -2506,7 +2691,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         }
       }
       posAttr.needsUpdate = true;
-      plasmaParticles.material.opacity = plasmaOn ? (0.92 + padLevel * 0.3) : 0.04;
+      plasmaParticles.material.opacity = plasmaOn ? (0.94 + padLevel * 0.35) : 0.02;
       plasmaParticles.material.color.setHSL(currentKeyHue + 0.2, 0.95, plasmaOn ? 0.9 : 0.35);
       plasmaParticles.material.size = 0.003 + (plasmaOn ? 0.003 * Math.min(1, str) : 0);
     }
@@ -2544,7 +2729,7 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         }
       }
       posAttr.needsUpdate = true;
-      floatPts.material.opacity = floatOn ? (0.85 + 0.4 * Math.sin(now * 1.2) + str * 0.3) : 0.07;
+      floatPts.material.opacity = floatOn ? (0.9 + 0.45 * Math.sin(colPhase * 1.1) + str * 0.35) : 0.03;
       floatPts.material.size = 0.003 + (floatOn ? 0.0015 * Math.abs(Math.sin(now * 1.5)) : 0);
     }
 
@@ -2562,7 +2747,9 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
         pu.kaleidoMix.value = kaleidoMix;
         pu.chromaticOffset.value = activeProfile.ca + touchIntensity * 0.005 + dblFlash * 0.008 + bassHit * 0.006 + micVisual * 0.006;
         const focusBreath = keysPressed.size === 0 ? 0.04 * Math.sin(now * 0.1) : 0;
-        pu.bloomStrength.value = activeProfile.bloom + dblFlash * 1.5 + touchIntensity * 0.5 + audioBoost * 1.0 + micVisual * 0.85 + focusBreath + gestureBloom;
+        const idleBreath = idleIntensity * (0.06 * Math.sin(now * 0.15) + 0.04);
+        pu.textureLayerMix.value = idleIntensity;
+        pu.bloomStrength.value = activeProfile.bloom + dblFlash * 1.5 + touchIntensity * 0.5 + audioBoost * 1.0 + micVisual * 0.85 + focusBreath + idleBreath + gestureBloom;
         pu.spiralAmt.value = curSpiral + touchIntensity * 0.2 + trebleLevel * 0.3 + gestureSpiral;
         pu.glitchAmt.value = curGlitch + dblFlash * 0.5 + bassHit * 0.4 + gestureGlitch;
         pu.mirrorXY.value.set(curMirrorX, curMirrorY);
