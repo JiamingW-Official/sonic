@@ -130,8 +130,8 @@ import { initMidiPlayer } from './midi-player.js';
   function computeLayerWeights(activeCols, fallbackCol, str, isKeyActive) {
     const cols = activeCols && activeCols.length ? activeCols : [fallbackCol];
     const count = cols.length;
-    const out = { tunnel: 0, vertical: 0, central: 0, radiate: 0, speed: 0, plasma: 0, float: 0 };
-    const keys = Object.keys(out);
+    const raw = { tunnel: 0, vertical: 0, central: 0, radiate: 0, speed: 0, plasma: 0, float: 0 };
+    const keys = Object.keys(raw);
     for (let i = 0; i < keys.length; i++) {
       const k = keys[i];
       const group = LAYER_GROUPS[k];
@@ -139,7 +139,20 @@ import { initMidiPlayer } from './midi-player.js';
       for (let j = 0; j < cols.length; j++) if (group.includes(cols[j])) hit++;
       const density = Math.pow(hit / Math.max(1, count), 0.82);
       const base = isKeyActive ? (0.18 + str * 1.02) : (0.08 + str * 0.36);
-      out[k] = Math.max(0, Math.min(1, density * base));
+      raw[k] = Math.max(0, Math.min(1, density * base));
+    }
+    // Keep only the strongest layer families so chords stay organized and readable.
+    raw.central *= 1.16;
+    raw.tunnel *= 1.08;
+    raw.radiate *= 1.05;
+    raw.float *= 0.82;
+    const ranked = Object.entries(raw).sort((a, b) => b[1] - a[1]);
+    const out = { tunnel: 0, vertical: 0, central: 0, radiate: 0, speed: 0, plasma: 0, float: 0 };
+    const keep = count >= 4 ? 3 : 2;
+    const gain = isKeyActive ? [1.0, 0.74, 0.52] : [0.64, 0.42, 0.28];
+    for (let i = 0; i < keep && i < ranked.length; i++) {
+      const key = ranked[i][0];
+      out[key] = ranked[i][1] * gain[i];
     }
     return out;
   }
@@ -174,6 +187,393 @@ import { initMidiPlayer } from './midi-player.js';
       crossover: Math.max(balance * 0.75, interleave * 0.95)
     };
   }
+
+  function pushRollImpulse(midi, velocity, srcTag) {
+    const t = performance.now() * 0.001;
+    rollImpulses.push({
+      midi: Math.max(0, Math.min(127, Math.round(midi))),
+      velocity: clamp01(velocity != null ? velocity : 0.8),
+      t,
+      src: srcTag || 'K'
+    });
+    if (rollImpulses.length > 280) rollImpulses.splice(0, rollImpulses.length - 280);
+  }
+  function pushRollDrumImpulse(typeOrIndex, velocity, srcTag) {
+    const idx = typeof typeOrIndex === 'number'
+      ? Math.max(0, Math.min(11, Math.round(typeOrIndex)))
+      : drumTypeToVisualIndex(typeOrIndex);
+    const t = performance.now() * 0.001;
+    rollDrumImpulses.push({
+      idx,
+      velocity: clamp01(velocity != null ? velocity : 0.9),
+      t,
+      src: srcTag || 'D'
+    });
+    if (rollDrumImpulses.length > 240) rollDrumImpulses.splice(0, rollDrumImpulses.length - 240);
+  }
+
+  function rollTrackPitchColor(outColor, trackIndex, midi, velocity, activeHue) {
+    const track = Math.max(0, trackIndex | 0);
+    const trackSeed = (track * 0.131 + 0.17) % 1;
+    const lane = ((Math.round(midi) % 12) + 12) % 12;
+    const pitchBand = lane < 4 ? 0 : (lane < 8 ? 1 : 2);
+    const bandShift = pitchBand === 0 ? -0.07 : (pitchBand === 1 ? 0.0 : 0.08);
+    const vel = clamp01(velocity != null ? velocity : 0.8);
+    const h = (trackSeed + activeHue * 0.22 + bandShift + Math.sin((lane + track) * 0.7) * 0.014 + 1) % 1;
+    const s = pitchBand === 1 ? 0.78 : 0.84;
+    const l = 0.44 + vel * 0.3 + (pitchBand === 2 ? 0.06 : 0);
+    outColor.setHSL(h, s, Math.min(0.9, l));
+    return outColor;
+  }
+
+  function updateRoll3DLayer(now, syncA, syncB, impactFlash, activeHue) {
+    if (!roll3DGroup || !roll3DSurfaces || !roll3DGlowSurfaces || !roll3DLines || !roll3DPoints) return;
+    const preview = Array.isArray(midiRollPreview) ? midiRollPreview : [];
+    const activeOrdered = collectOrderedActiveNotes();
+    const live = Array.isArray(displayedMidiNotes) ? displayedMidiNotes : [];
+    rollImpulses = rollImpulses.filter((e) => (now - e.t) <= 2.6);
+    rollDrumImpulses = rollDrumImpulses.filter((e) => (now - e.t) <= 2.2);
+
+    const melodicPreview = [];
+    const drumPreview = [];
+    let midiMin = 42;
+    let midiMax = 90;
+    for (let i = 0; i < preview.length; i++) {
+      const n = preview[i];
+      if (n.isDrum) {
+        drumPreview.push(n);
+        continue;
+      }
+      melodicPreview.push(n);
+      const m = n.midi | 0;
+      if (m < midiMin) midiMin = m;
+      if (m > midiMax) midiMax = m;
+    }
+    for (let i = 0; i < live.length; i++) {
+      const m = live[i] | 0;
+      if (m < midiMin) midiMin = m;
+      if (m > midiMax) midiMax = m;
+    }
+    for (let i = 0; i < rollImpulses.length; i++) {
+      const m = rollImpulses[i].midi | 0;
+      if (m < midiMin) midiMin = m;
+      if (m > midiMax) midiMax = m;
+    }
+
+    midiMin = Math.max(0, midiMin - 4);
+    midiMax = Math.min(127, midiMax + 4);
+    const span = Math.max(16, midiMax - midiMin + 1);
+    const nearZ = 2.7;
+    const farZ = -6.9;
+    const depthSpan = nearZ - farZ;
+    const windowSec = Math.max(7.2, 15.2 / Math.max(0.72, midiPlaybackSpeed));
+    const yBase = -0.08;
+    const WEB_SPOKES = 14;
+    const WEB_RINGS = 10;
+    const webRot = 0.06 * Math.sin(now * 0.17) + 0.03 * Math.sin(now * 0.11 + 1.2);
+    const webNearRadius = 2.0;
+
+    function depthNormAtAhead(ahead) {
+      return clamp01(ahead / windowSec);
+    }
+    function webPoint(spokeFloat, depthN, radiusScale) {
+      const dn = clamp01(depthN);
+      const farEase = Math.pow(dn, 1.08);
+      const near = 1.0 - farEase;
+      const ang = ((spokeFloat % WEB_SPOKES + WEB_SPOKES) % WEB_SPOKES) / WEB_SPOKES * TAU + webRot;
+      const radius = 0.03 + webNearRadius * Math.max(0.3, radiusScale) * Math.pow(near, 0.88);
+      return {
+        x: Math.cos(ang) * radius,
+        y: yBase + Math.sin(ang) * radius * 0.62 + near * 0.05,
+        z: nearZ - farEase * depthSpan,
+        near,
+        farEase
+      };
+    }
+    function noteLane(midi, trackIndex) {
+      const m = Math.max(midiMin, Math.min(midiMax, midi));
+      const laneNorm = ((m - midiMin + 0.5) / span) - 0.5;
+      const pc = ((Math.round(m) % 12) + 12) % 12;
+      const base = (laneNorm + 0.5) * (WEB_SPOKES - 2);
+      const jitter = ((pc / 12) - 0.5) * 0.14 + ((trackIndex | 0) % 3) * 0.02;
+      const leftSpoke = Math.max(0, Math.min(WEB_SPOKES - 1.001, base + jitter));
+      const rightSpoke = leftSpoke + 1.0;
+      const radiusScale = 0.52 + Math.abs(laneNorm) * 0.92 + (Math.floor(m / 12) % 3) * 0.05;
+      return { leftSpoke, rightSpoke, centerSpoke: leftSpoke + 0.5, radiusScale, laneNorm };
+    }
+    function drumLane(idx) {
+      const lane = Math.max(0, Math.min(11, idx | 0));
+      return {
+        spoke: lane / 12 * WEB_SPOKES + 0.15,
+        radiusScale: 1.12 + (lane % 3) * 0.08
+      };
+    }
+    function pushLine(arr, idxRef, x1, y1, z1, x2, y2, z2) {
+      if (idxRef.i + 6 > arr.length) return false;
+      arr[idxRef.i++] = x1; arr[idxRef.i++] = y1; arr[idxRef.i++] = z1;
+      arr[idxRef.i++] = x2; arr[idxRef.i++] = y2; arr[idxRef.i++] = z2;
+      return true;
+    }
+    function pushStrongLine(arr, idxRef, x1, y1, z1, x2, y2, z2) {
+      if (!pushLine(arr, idxRef, x1, y1, z1, x2, y2, z2)) return false;
+      return pushLine(arr, idxRef, x1, y1, z1, x2, y2, z2);
+    }
+    function pushPoint(posArr, colArr, idxRef, x, y, z, r, g, b) {
+      if ((idxRef.i + 1) * 3 > posArr.length) return false;
+      const p = idxRef.i * 3;
+      posArr[p] = x; posArr[p + 1] = y; posArr[p + 2] = z;
+      colArr[p] = r; colArr[p + 1] = g; colArr[p + 2] = b;
+      idxRef.i++;
+      return true;
+    }
+
+    const dummy = updateRoll3DLayer._dummy || (updateRoll3DLayer._dummy = new THREE.Object3D());
+    const colTmp = updateRoll3DLayer._col || (updateRoll3DLayer._col = new THREE.Color());
+    const dirTmp = updateRoll3DLayer._dir || (updateRoll3DLayer._dir = new THREE.Vector3());
+    const sideTmp = updateRoll3DLayer._side || (updateRoll3DLayer._side = new THREE.Vector3());
+    const upTmp = updateRoll3DLayer._up || (updateRoll3DLayer._up = new THREE.Vector3());
+    const axisY = updateRoll3DLayer._axisY || (updateRoll3DLayer._axisY = new THREE.Vector3(0, 1, 0));
+    const axisX = updateRoll3DLayer._axisX || (updateRoll3DLayer._axisX = new THREE.Vector3(1, 0, 0));
+    const axisZ = updateRoll3DLayer._axisZ || (updateRoll3DLayer._axisZ = new THREE.Vector3(0, 0, 1));
+    const basisMat = updateRoll3DLayer._basisMat || (updateRoll3DLayer._basisMat = new THREE.Matrix4());
+    const quatTmp = updateRoll3DLayer._quat || (updateRoll3DLayer._quat = new THREE.Quaternion());
+    let instCount = 0;
+    const lineV = { i: 0 };
+    const pointV = { i: 0 };
+
+    // Spider-web track: radial spokes + concentric rings in perspective.
+    for (let s = 0; s < WEB_SPOKES; s++) {
+      let prev = webPoint(s, 0, 1.0);
+      for (let r = 1; r <= WEB_RINGS; r++) {
+        const p = webPoint(s, r / WEB_RINGS, 1.0);
+        if (!pushLine(roll3DLinePosArray, lineV, prev.x, prev.y, prev.z, p.x, p.y, p.z)) break;
+        prev = p;
+      }
+    }
+    for (let r = 1; r <= WEB_RINGS; r++) {
+      for (let s = 0; s < WEB_SPOKES; s++) {
+        const a = webPoint(s, r / WEB_RINGS, 1.0);
+        const b = webPoint((s + 1) % WEB_SPOKES, r / WEB_RINGS, 1.0);
+        if (!pushLine(roll3DLinePosArray, lineV, a.x, a.y, a.z, b.x, b.y, b.z)) break;
+      }
+    }
+
+    const previewLimit = 96;
+    let melodicCount = 0;
+    for (let i = 0; i < melodicPreview.length && melodicCount < previewLimit; i++) {
+      const n = melodicPreview[i];
+      const ahead = n.ahead != null ? n.ahead : ((n.time || 0) - midiPlaybackPosition);
+      const dur = Math.max(0.06, Math.min(6.4, n.duration || 0.15));
+      const durVisual = Math.max(0.1, Math.min(7.2, dur * 1.44));
+      if (ahead > windowSec + 0.95 || (ahead + durVisual) < -0.45) continue;
+      melodicCount++;
+
+      const lane = noteLane(n.midi, n.trackIndex | 0);
+      const headN = depthNormAtAhead(Math.max(0, ahead));
+      const tailN = depthNormAtAhead(Math.max(0, ahead + durVisual));
+      const pHeadL = webPoint(lane.leftSpoke, headN, lane.radiusScale);
+      const pHeadR = webPoint(lane.rightSpoke, headN, lane.radiusScale);
+      const pTailL = webPoint(lane.leftSpoke, tailN, lane.radiusScale);
+      const pTailR = webPoint(lane.rightSpoke, tailN, lane.radiusScale);
+      const headCx = (pHeadL.x + pHeadR.x) * 0.5;
+      const headCy = (pHeadL.y + pHeadR.y) * 0.5;
+      const headCz = (pHeadL.z + pHeadR.z) * 0.5;
+      const tailCx = (pTailL.x + pTailR.x) * 0.5;
+      const tailCy = (pTailL.y + pTailR.y) * 0.5;
+      const tailCz = (pTailL.z + pTailR.z) * 0.5;
+
+      const vel = clamp01(n.velocity != null ? n.velocity : 0.8);
+      const depthNear = Math.max(pHeadL.near, pHeadR.near);
+      rollTrackPitchColor(colTmp, n.trackIndex, n.midi, vel, activeHue);
+      colTmp.setRGB(
+        Math.min(1, colTmp.r + 0.24 + depthNear * 0.26),
+        Math.min(1, colTmp.g + 0.24 + depthNear * 0.26),
+        Math.min(1, colTmp.b + 0.26 + depthNear * 0.28)
+      );
+      const noteR = colTmp.r;
+      const noteG = colTmp.g;
+      const noteB = colTmp.b;
+
+      // Box edges are explicitly on the two rails.
+      pushStrongLine(roll3DLinePosArray, lineV, pTailL.x, pTailL.y, pTailL.z, pHeadL.x, pHeadL.y, pHeadL.z);
+      pushStrongLine(roll3DLinePosArray, lineV, pTailR.x, pTailR.y, pTailR.z, pHeadR.x, pHeadR.y, pHeadR.z);
+      pushStrongLine(roll3DLinePosArray, lineV, pTailL.x, pTailL.y, pTailL.z, pTailR.x, pTailR.y, pTailR.z);
+      pushStrongLine(roll3DLinePosArray, lineV, pHeadL.x, pHeadL.y, pHeadL.z, pHeadR.x, pHeadR.y, pHeadR.z);
+
+      // One clear MIDI trajectory line per note (no inner trend/wobble).
+      pushStrongLine(roll3DLinePosArray, lineV, tailCx, tailCy, tailCz, headCx, headCy, headCz);
+
+      const coreSteps = 6;
+      for (let t = 0; t <= coreSteps; t++) {
+        const tt = t / coreSteps;
+        const px = tailCx + (headCx - tailCx) * tt;
+        const py = tailCy + (headCy - tailCy) * tt;
+        const pz = tailCz + (headCz - tailCz) * tt;
+        const glow = 0.2 + Math.sin(tt * Math.PI) * 0.4;
+        pushPoint(
+          roll3DPointPosArray, roll3DPointColArray, pointV,
+          px, py, pz,
+          Math.min(1, noteR + glow),
+          Math.min(1, noteG + glow),
+          Math.min(1, noteB + glow + 0.02)
+        );
+      }
+    }
+
+    // Drum notes on outer web lanes, still far -> near.
+    for (let i = 0; i < drumPreview.length && instCount < ROLL3D_MAX_INSTANCES; i++) {
+      const n = drumPreview[i];
+      const ahead = n.ahead != null ? n.ahead : ((n.time || 0) - midiPlaybackPosition);
+      const dur = Math.max(0.03, Math.min(1.2, n.duration || 0.09));
+      if (ahead > windowSec + 0.5 || (ahead + dur) < -0.2) continue;
+      const lane = drumLane(n.drumClass != null ? n.drumClass : drumTypeToVisualIndex(n.drumType));
+      const pHead = webPoint(lane.spoke, depthNormAtAhead(Math.max(0, ahead)), lane.radiusScale);
+      const pTail = webPoint(lane.spoke, depthNormAtAhead(Math.max(0, ahead + dur)), lane.radiusScale);
+      dirTmp.set(pHead.x - pTail.x, pHead.y - pTail.y, pHead.z - pTail.z);
+      const len = Math.max(0.06, dirTmp.length());
+      dirTmp.normalize();
+      quatTmp.setFromUnitVectors(axisY, dirTmp);
+      const vel = clamp01(n.velocity != null ? n.velocity : 0.86);
+      const vTag = String(n.drumVariant || '').toLowerCase();
+      const bright = /bright|bell|click|splash|tight/.test(vTag);
+      const dark = /deep|sub|dark|floor/.test(vTag);
+      colTmp.setHSL((activeHue + 0.08 + i * 0.03) % 1, bright ? 0.9 : 0.82, Math.min(0.9, (dark ? 0.46 : 0.55) + vel * 0.28));
+      dummy.position.set((pHead.x + pTail.x) * 0.5, (pHead.y + pTail.y) * 0.5, (pHead.z + pTail.z) * 0.5);
+      dummy.quaternion.copy(quatTmp);
+      dummy.scale.set(0.062 + vel * 0.02, len * 1.02, 1);
+      dummy.updateMatrix();
+      roll3DSurfaces.setMatrixAt(instCount, dummy.matrix);
+      roll3DSurfaces.setColorAt(instCount, colTmp);
+      dummy.scale.set(0.096, len * 1.08, 1);
+      dummy.updateMatrix();
+      roll3DGlowSurfaces.setMatrixAt(instCount, dummy.matrix);
+      roll3DGlowSurfaces.setColorAt(instCount, colTmp);
+      instCount++;
+      pushLine(roll3DLinePosArray, lineV, pTail.x, pTail.y, pTail.z, pHead.x, pHead.y, pHead.z);
+    }
+
+    // Active note accents near the viewer.
+    for (let i = 0; i < activeOrdered.length && instCount < ROLL3D_MAX_INSTANCES; i++) {
+      const n = activeOrdered[i];
+      const lane = noteLane(n.midi, i + 3);
+      const pL = webPoint(lane.leftSpoke, 0, lane.radiusScale);
+      const pR = webPoint(lane.rightSpoke, 0, lane.radiusScale);
+      const pFarL = webPoint(lane.leftSpoke, 0.045, lane.radiusScale);
+      const pFarR = webPoint(lane.rightSpoke, 0.045, lane.radiusScale);
+      const nearCx = (pL.x + pR.x) * 0.5;
+      const nearCy = (pL.y + pR.y) * 0.5;
+      const nearCz = (pL.z + pR.z) * 0.5;
+      const farCx = (pFarL.x + pFarR.x) * 0.5;
+      const farCy = (pFarL.y + pFarR.y) * 0.5;
+      const farCz = (pFarL.z + pFarR.z) * 0.5;
+      dirTmp.set(nearCx - farCx, nearCy - farCy, nearCz - farCz);
+      if (dirTmp.lengthSq() < 1e-5) dirTmp.copy(axisY);
+      dirTmp.normalize();
+      sideTmp.set(pR.x - pL.x, pR.y - pL.y, pR.z - pL.z);
+      if (sideTmp.lengthSq() < 1e-5) sideTmp.copy(axisX);
+      sideTmp.normalize();
+      upTmp.crossVectors(sideTmp, dirTmp);
+      if (upTmp.lengthSq() < 1e-5) upTmp.copy(axisZ);
+      upTmp.normalize();
+      basisMat.makeBasis(sideTmp, dirTmp, upTmp);
+      quatTmp.setFromRotationMatrix(basisMat);
+      const laneW = Math.max(0.09, Math.hypot(pR.x - pL.x, pR.y - pL.y, pR.z - pL.z));
+      rollTrackPitchColor(colTmp, n.src === 'M' ? (i + 7) : i, n.midi, 1.0, activeHue);
+      colTmp.setRGB(Math.min(1, colTmp.r + 0.3), Math.min(1, colTmp.g + 0.3), Math.min(1, colTmp.b + 0.32));
+      dummy.position.set(nearCx + upTmp.x * (0.05 + (i % 3) * 0.008), nearCy + upTmp.y * (0.05 + (i % 3) * 0.008), nearCz + upTmp.z * (0.05 + (i % 3) * 0.008));
+      dummy.quaternion.copy(quatTmp);
+      dummy.scale.set(laneW * 0.92, 0.19, 1);
+      dummy.updateMatrix();
+      roll3DSurfaces.setMatrixAt(instCount, dummy.matrix);
+      roll3DSurfaces.setColorAt(instCount, colTmp);
+      dummy.scale.set(laneW * 1.28, 0.23, 1);
+      dummy.updateMatrix();
+      roll3DGlowSurfaces.setMatrixAt(instCount, dummy.matrix);
+      roll3DGlowSurfaces.setColorAt(instCount, colTmp);
+      instCount++;
+    }
+
+    // Sparks / impulses
+    for (let i = 0; i < rollImpulses.length; i++) {
+      const ev = rollImpulses[i];
+      const age = now - ev.t;
+      if (age < 0 || age > 2.6) continue;
+      const lane = noteLane(ev.midi, ev.src === 'M' ? 2 : 0);
+      const core = webPoint(lane.centerSpoke, depthNormAtAhead(Math.max(0, (1.0 - age / 2.6) * windowSec * 0.8)), lane.radiusScale);
+      const rr = 0.012 + age * 0.055;
+      rollTrackPitchColor(colTmp, ev.src === 'D' ? 17 : (ev.src === 'M' ? 9 : 2), ev.midi, ev.velocity, activeHue);
+      const count = 6 + Math.floor(ev.velocity * 6);
+      for (let k = 0; k < count; k++) {
+        const ang = (k / count) * TAU + age * 3.1;
+        if (!pushPoint(
+          roll3DPointPosArray, roll3DPointColArray, pointV,
+          core.x + Math.cos(ang) * rr,
+          core.y + Math.sin(ang * 1.4) * rr * 0.7,
+          core.z - (k / count) * (0.1 + age * 0.16),
+          Math.min(1, colTmp.r + 0.2),
+          Math.min(1, colTmp.g + 0.2),
+          Math.min(1, colTmp.b + 0.22)
+        )) break;
+      }
+    }
+    for (let i = 0; i < rollDrumImpulses.length; i++) {
+      const ev = rollDrumImpulses[i];
+      const age = now - ev.t;
+      if (age < 0 || age > 2.2) continue;
+      const lane = drumLane(ev.idx);
+      const core = webPoint(lane.spoke, depthNormAtAhead(Math.max(0, (1.0 - age / 2.2) * windowSec * 0.72)), lane.radiusScale);
+      const count = 5 + Math.floor(ev.velocity * 5);
+      const rr = 0.012 + age * 0.05;
+      colTmp.setHSL((activeHue + 0.12 + ev.idx * 0.03) % 1, 0.9, 0.72);
+      for (let k = 0; k < count; k++) {
+        const ang = (k / count) * TAU + age * 3.8;
+        if (!pushPoint(
+          roll3DPointPosArray, roll3DPointColArray, pointV,
+          core.x + Math.cos(ang) * rr,
+          core.y + Math.sin(ang * 1.4) * rr * 0.62,
+          core.z - (k / count) * (0.1 + age * 0.14),
+          Math.min(1, colTmp.r + 0.18),
+          Math.min(1, colTmp.g + 0.18),
+          Math.min(1, colTmp.b + 0.2)
+        )) break;
+      }
+    }
+
+    // Depth dust on web rings.
+    for (let r = 2; r <= WEB_RINGS; r += 3) {
+      for (let s = 0; s < WEB_SPOKES; s += 3) {
+        const p = webPoint(s + 0.2 * Math.sin(now * 0.3 + s), r / WEB_RINGS, 0.92);
+        const dim = 0.2 + p.near * 0.24;
+        if (!pushPoint(
+          roll3DPointPosArray, roll3DPointColArray, pointV,
+          p.x, p.y, p.z,
+          Math.min(1, 0.54 + dim), Math.min(1, 0.62 + dim), Math.min(1, 0.8 + dim)
+        )) break;
+      }
+    }
+
+    roll3DSurfaces.count = instCount;
+    roll3DSurfaces.instanceMatrix.needsUpdate = true;
+    roll3DGlowSurfaces.count = instCount;
+    roll3DGlowSurfaces.instanceMatrix.needsUpdate = true;
+    if (roll3DSurfaces.instanceColor) roll3DSurfaces.instanceColor.needsUpdate = true;
+    if (roll3DGlowSurfaces.instanceColor) roll3DGlowSurfaces.instanceColor.needsUpdate = true;
+
+    roll3DLines.geometry.setDrawRange(0, Math.floor(lineV.i / 3));
+    roll3DLinePosAttr.needsUpdate = true;
+    roll3DPoints.geometry.setDrawRange(0, pointV.i);
+    roll3DPointPosAttr.needsUpdate = true;
+    roll3DPointColAttr.needsUpdate = true;
+
+    roll3DGroup.rotation.x = -0.015 + 0.005 * Math.sin(now * 0.2 + 0.4) + impactFlash * 0.006;
+    roll3DGroup.rotation.y = 0.008 * Math.sin(now * 0.17 + 0.6);
+    roll3DGroup.rotation.z = 0.003 * Math.sin(now * 0.24 + 1.1);
+    roll3DGroup.position.set(0, -0.02 + 0.004 * Math.sin(now * 0.23), 0.5 + 0.008 * Math.sin(now * 0.19 + 0.9));
+    roll3DSurfaces.material.opacity = Math.min(1.0, 0.84 + 0.12 * (0.5 + 0.5 * syncA) + impactFlash * 0.12);
+    roll3DGlowSurfaces.material.opacity = Math.min(0.92, 0.28 + 0.1 * (0.5 + 0.5 * syncB) + impactFlash * 0.14);
+    roll3DLines.material.opacity = Math.min(0.74, 0.28 + 0.08 * (0.5 + 0.5 * syncB) + impactFlash * 0.06);
+    roll3DPoints.material.opacity = Math.min(0.98, 0.54 + 0.14 * (0.5 + 0.5 * syncA) + impactFlash * 0.1);
+  }
   const HARMONY_MODES = ['off', 'auto3', 'maj3', 'min3', 'fifth', 'ninth'];
   const HARMONY_MODE_LABEL = { off: 'OFF', auto3: 'AUTO3', maj3: 'MAJ3', min3: 'MIN3', fifth: '5TH', ninth: '9TH' };
   let harmonyModeIdx = 0;
@@ -203,6 +603,7 @@ import { initMidiPlayer } from './midi-player.js';
   }
 
   let scene, camera, renderer, gpuCompute, positionVariable, velocityVariable;
+  let rollOverlayScene, rollOverlayCamera;
   let particlePoints, boxWireframe;
   let verticalParticleColumns;
   let attractor = { x: 0, y: 0, z: 0, strength: 0, col: 0, row: 0 };
@@ -225,18 +626,34 @@ import { initMidiPlayer } from './midi-player.js';
   const PLASMA_POINTS = 1200;
   const MATRIX_SURF_POINTS = 5600;
   const PRISM_SPOKE_POINTS = 2400;
+  const ROLL3D_MAX_INSTANCES = 320;
+  const ROLL3D_MAX_LINES = 6400;
+  const ROLL3D_MAX_POINTS = 12000;
   let burstRingTime = -1;
   let tunnelParticles, centralColumnParticles, radiatingParticles, speedLineParticles;
   let burstRingParticles, plasmaParticles, floatingParticleClouds, matrixSurfaceParticles, prismSpokeParticles, bgPlane;
+  let roll3DGroup, roll3DFloor, roll3DSurfaces, roll3DGlowSurfaces, roll3DLines, roll3DPoints;
+  let roll3DLinePosAttr, roll3DPointPosAttr, roll3DPointColAttr;
+  let roll3DLinePosArray, roll3DPointPosArray, roll3DPointColArray;
+  let rollImpulses = [];
+  let rollDrumImpulses = [];
   let keyDisplayCanvas, keyDisplayTexture, keyDisplayMesh;
   let keyDisplayReveal = 0; // 0..1 for reveal animation
   let displayedMidiNotes = []; // current MIDI chord for text display (every note)
+  let midiRollPreview = [];
+  let midiPlaybackActive = false;
+  let midiPlaybackSpeed = 1;
+  let midiPlaybackPosition = 0;
+  let midiPlaybackDuration = 0;
+  let midiPlaybackPolyphony = 0;
   let composer, postScene, postCamera, postQuad, rtScene;
   const particleMatOpts = { transparent: true, sizeAttenuation: true, vertexColors: false, blending: THREE.AdditiveBlending, depthWrite: false };
   let noteRepeatOverlayEl = null;
   let noteRepeatRowEls = [];
   let noteRepeatSignature = '';
   let noteRepeatStyleEl = null;
+  let lastKickImpact = -10;
+  let lastDrumMinorImpact = -10;
 
   const velocityShader = `
     uniform float time;
@@ -289,6 +706,13 @@ import { initMidiPlayer } from './midi-player.js';
     camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 100);
     camera.position.z = 4.5;
 
+    // Roll overlay scene: independent top layer, not affected by main camera/post distortion.
+    rollOverlayScene = new THREE.Scene();
+    rollOverlayScene.background = null;
+    rollOverlayCamera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.1, 100);
+    rollOverlayCamera.position.set(0, 0.0, 4.35);
+    rollOverlayCamera.lookAt(0, -0.12, -1.9);
+
     // Background: dynamic aurora / nebula with stars
     const bgGeo = new THREE.PlaneGeometry(20, 20);
     const bgMat = new THREE.ShaderMaterial({
@@ -311,7 +735,7 @@ import { initMidiPlayer } from './midi-player.js';
           float a=0.5;
           for(int i=0;i<5;i++){
             f+=a*noise(p);
-            p=p*2.02+vec2(13.7,7.3);
+            p=p*2.03+vec2(11.3,6.7);
             a*=0.5;
           }
           return f;
@@ -326,7 +750,7 @@ import { initMidiPlayer } from './midi-player.js';
             for(float x=-1.0;x<=1.0;x+=1.0){
               vec2 g=vec2(x,y);
               vec2 o=hash2(i+g);
-              vec2 p=g+0.5+0.42*sin(o*6.2831+time*0.2)-f;
+              vec2 p=g+0.5+0.35*sin(o*6.2831+time*0.18)-f;
               float d=dot(p,p);
               if(d<d1){ d2=d1; d1=d; } else if(d<d2){ d2=d; }
             }
@@ -343,52 +767,56 @@ import { initMidiPlayer } from './midi-player.js';
           float syncB=sin(time*0.38+1.0);
           float breathe=0.5+0.5*syncA;
           float lvl=clamp(audioLevel,0.0,1.0);
-          float centerBlank=1.0-smoothstep(0.0,0.24,r);
-          float outerMask=smoothstep(0.22,0.74,r)*(1.0-smoothstep(0.9,1.08,r));
 
-          vec2 rc=rot(0.12*syncB+0.08*lvl)*c;
-          float nA=fbm(rc*3.2+vec2(time*0.09,-time*0.06));
-          float nB=fbm(rot(-0.32+0.14*syncA)*(c*4.9)+vec2(-time*0.07,time*0.05));
-          float nC=fbm(vec2(a*2.3+time*0.18+lvl*0.5,r*7.8-time*0.15));
-          vec2 v=voronoi(uv*vec2(8.0,5.8)+vec2(time*0.08,-time*0.06));
-          float cell=1.0-smoothstep(0.06,0.24,v.x);
-          float edge=1.0-smoothstep(0.008,0.03,v.y);
+          vec2 pA=rot(0.14*syncB)*(c*3.0)+vec2(time*0.06,-time*0.045);
+          vec2 pB=rot(-0.28+0.08*syncA)*(c*5.4)+vec2(-time*0.05,time*0.04);
+          float nA=fbm(pA);
+          float nB=fbm(pB);
+          float field=(nA*0.78+nB*0.56)+(0.26+0.18*lvl)*sin(a*4.0+time*0.22)+r*1.35;
+          float contourA=1.0-smoothstep(0.0,0.03,abs(fract(field*(9.0+lvl*12.0))-0.5));
+          float contourB=1.0-smoothstep(0.0,0.02,abs(fract(field*(5.2+lvl*7.5)+0.25)-0.5));
+          float contour=contourA*0.64+contourB*0.42;
 
-          float radialGridA=1.0-smoothstep(0.0,0.018,abs(fract((a/PI)*7.5+0.16*syncB)-0.5));
-          float radialGridB=1.0-smoothstep(0.0,0.016,abs(fract(r*12.0+0.12*syncA)-0.5));
-          float matrix=(1.0-smoothstep(0.0,0.04,abs(fract((uv.x+0.5*sin(time*0.05))*48.0)-0.5)))*
-                       (1.0-smoothstep(0.0,0.13,abs(fract((uv.y+0.5*cos(time*0.04))*22.0)-0.5)));
-          float lsdNoise=fbm(rot(0.52+0.18*syncA)*(c*(7.2+lvl*2.4))+vec2(time*0.24,-time*0.2));
-          float lsdMeshA=1.0-smoothstep(0.0,0.02,abs(fract((a/PI)*(13.0+lvl*7.0)+lsdNoise*1.7+time*0.22)-0.5));
-          float lsdMeshB=1.0-smoothstep(0.0,0.018,abs(fract(r*23.0-lsdNoise*2.1-time*0.26)-0.5));
-          float lsdShard=pow(max(0.0,cos(a*(20.0+lvl*9.0)+time*0.44+sin(r*20.0-time*0.7))),9.0);
+          vec2 v=voronoi(uv*vec2(10.0,6.2)+vec2(time*0.06,-time*0.05));
+          float shardEdge=1.0-smoothstep(0.01,0.045,v.y);
+          float shardFill=1.0-smoothstep(0.1,0.34,v.x);
 
-          float prismRing1=exp(-pow((r-(0.26+0.05*syncB))*7.3,2.0));
-          float prismRing2=exp(-pow((r-(0.48+0.04*syncA))*8.2,2.0));
-          float fanFold=pow(max(0.0,cos(a*(10.0+lvl*6.0)+time*0.24+sin(r*20.0-time*0.45))),8.0);
+          vec2 mUv=rot(0.08*syncA)*(c*vec2(74.0,56.0))+vec2(time*0.26,-time*0.21);
+          float matrixA=1.0-smoothstep(0.0,0.022,abs(fract(mUv.x)-0.5));
+          float matrixB=1.0-smoothstep(0.0,0.022,abs(fract(mUv.y)-0.5));
+          float matrix=(matrixA*0.7+matrixB*0.5);
 
-          vec3 base=mix(vec3(0.010,0.012,0.028),vec3(0.022,0.018,0.045),breathe);
-          vec3 neb=hsl(activeHue,0.82,0.12)*nA+hsl(activeHue+0.16,0.72,0.10)*nB+hsl(activeHue+0.52,0.64,0.08)*nC;
-          vec3 couture=hsl(activeHue+0.57,0.7,0.2)*pow(radialGridA,1.3)*(0.025+0.04*lvl);
-          vec3 matrixCol=hsl(activeHue+0.21,0.44,0.24)*matrix*(0.018+0.03*(0.5+0.5*syncB)+0.03*lvl);
-          vec3 cellCol=mix(hsl(activeHue+0.08,0.62,0.14),hsl(activeHue+0.64,0.56,0.16),0.5+0.5*sin(time*0.12))*cell*(0.03+0.06*lvl);
-          vec3 ringCol=hsl(activeHue+0.1,0.72,0.24)*prismRing1*(0.24+0.12*lvl)+hsl(activeHue+0.48,0.68,0.22)*prismRing2*(0.18+0.1*lvl);
-          vec3 fanCol=hsl(activeHue+0.34,0.6,0.24)*fanFold*prismRing2*(0.14+0.08*lvl);
-          vec3 lsdDense=hsl(activeHue+0.62,0.72,0.24)*(lsdMeshA*0.58+lsdMeshB*0.42)*(0.026+0.05*lvl)*outerMask;
-          vec3 lsdShards=hsl(activeHue+0.28,0.66,0.26)*lsdShard*(0.02+0.042*lvl)*outerMask;
+          float outerBand=smoothstep(0.24,0.92,r)*(1.0-smoothstep(0.9,1.2,r));
+          float centerVoid=1.0-smoothstep(0.0,0.22,r);
+          float spokes=pow(max(0.0,cos(a*(8.0+lvl*6.0)+time*0.4+sin(r*18.0-time*0.8))),10.0);
+          float ringA=exp(-pow((r-(0.33+0.03*syncB))*8.8,2.0));
+          float ringB=exp(-pow((r-(0.56+0.04*syncA))*9.6,2.0));
 
-          vec3 col=base+neb+couture+matrixCol+cellCol+ringCol+fanCol+lsdDense+lsdShards;
-          col+=edge*mix(vec3(0.75,0.9,1.0),hsl(activeHue+0.2,0.5,0.3),0.55)*(0.045+0.06*lvl);
+          vec3 deep=mix(vec3(0.005,0.008,0.02),vec3(0.015,0.014,0.032),breathe);
+          vec3 tintA=hsl(activeHue+0.02,0.76,0.17);
+          vec3 tintB=hsl(activeHue+0.56,0.58,0.16);
+          vec3 tintC=hsl(activeHue+0.28,0.52,0.22);
+          vec3 neb=tintA*(0.22+0.5*nA)+tintB*(0.18+0.44*nB);
+          vec3 contourCol=mix(tintA,tintB,0.45+0.25*sin(time*0.18))*contour*outerBand*(0.05+0.08*lvl);
+          vec3 matrixCol=tintC*matrix*outerBand*(0.018+0.03*lvl);
+          vec3 shardCol=mix(vec3(0.8,0.92,1.0),tintB,0.56)*(shardEdge*0.78+shardFill*0.18)*outerBand*(0.015+0.038*lvl);
+          vec3 ringCol=mix(tintA,tintC,0.5+0.5*syncB)*(ringA*0.24+ringB*0.18)*(0.4+0.6*lvl);
+          vec3 spokeCol=tintC*spokes*outerBand*(0.018+0.05*lvl);
 
-          float star1=step(0.9982,hash(floor(uv*vec2(420.0,250.0))));
-          float star2=step(0.9987,hash(floor(uv*vec2(300.0,200.0)+41.0)));
-          float twinkle=0.52+0.48*sin(time*2.0+hash(floor(uv*vec2(420.0,250.0)))*140.0);
-          col+=(star1+star2*0.65)*0.11*vec3(0.86,0.92,1.0)*twinkle;
+          vec2 edgeCell=floor((uv-0.5)*vec2(92.0,76.0)+floor(time*0.7));
+          float sparkHash=hash(edgeCell);
+          float spark=step(0.972,sparkHash)*(0.5+0.5*sin(time*0.9+sparkHash*20.0+r*32.0));
+          vec3 sparkCol=mix(vec3(0.86,0.95,1.0),tintA,0.42)*spark*outerBand*0.18;
 
-          col*=mix(1.0,0.28,smoothstep(0.0,0.96,r));
-          col=mix(col, base+neb*0.58+ringCol*0.42, centerBlank*0.52);
-          col*=1.0+0.09*(1.0-smoothstep(0.0,0.28,r));
-          gl_FragColor=vec4(col,1.0);
+          vec3 col=deep+neb*0.44+contourCol+matrixCol+shardCol+ringCol+spokeCol+sparkCol;
+          col=mix(col,deep+neb*0.24+ringCol*0.3,centerVoid*0.86);
+          col*=1.0-smoothstep(0.84,1.18,r)*0.72;
+          col+=vec3(0.02,0.03,0.05)*pow(max(0.0,1.0-r*1.35),2.0)*(0.5+0.5*lvl);
+
+          float star=step(0.9987,hash(floor(uv*vec2(410.0,236.0))));
+          float twinkle=0.6+0.4*sin(time*1.9+hash(floor(uv*vec2(410.0,236.0)))*130.0);
+          col+=vec3(0.84,0.91,1.0)*star*0.09*twinkle;
+          gl_FragColor=vec4(max(col,vec3(0.0)),1.0);
         }
       `,
       depthWrite: false, depthTest: false
@@ -406,7 +834,7 @@ import { initMidiPlayer } from './midi-player.js';
     keyDisplayTexture = new THREE.CanvasTexture(keyDisplayCanvas);
     keyDisplayTexture.minFilter = THREE.LinearFilter;
     keyDisplayTexture.magFilter = THREE.LinearFilter;
-    const keyDisplayGeo = new THREE.PlaneGeometry(2.1, 0.68);
+    const keyDisplayGeo = new THREE.PlaneGeometry(2.44, 0.82);
     const keyDisplayMat = new THREE.MeshBasicMaterial({
       map: keyDisplayTexture,
       transparent: true,
@@ -416,8 +844,9 @@ import { initMidiPlayer } from './midi-player.js';
       side: THREE.DoubleSide
     });
     keyDisplayMesh = new THREE.Mesh(keyDisplayGeo, keyDisplayMat);
-    keyDisplayMesh.position.set(0, -0.22, 2.35);
-    keyDisplayMesh.userData.baseY = -0.22;
+    keyDisplayMesh.position.set(0, -0.24, 2.34);
+    keyDisplayMesh.userData.baseY = -0.24;
+    keyDisplayMesh.visible = false;
     keyDisplayMesh.renderOrder = 1000;
     scene.add(keyDisplayMesh);
 
@@ -467,6 +896,7 @@ import { initMidiPlayer } from './midi-player.js';
         prismAmt: { value: 0.62 },
         audioLevel: { value: 0.0 },
         bioAmt: { value: 0.35 },
+        impactFlash: { value: 0.0 },
         pixelateMix: { value: 0.58 },
         analogMix: { value: 0.66 },
         subpixelMix: { value: 0.58 },
@@ -499,6 +929,7 @@ import { initMidiPlayer } from './midi-player.js';
         uniform float prismAmt;
         uniform float audioLevel;
         uniform float bioAmt;
+        uniform float impactFlash;
         uniform float pixelateMix;
         uniform float analogMix;
         uniform float subpixelMix;
@@ -813,13 +1244,16 @@ import { initMidiPlayer } from './midi-player.js';
           float m1=exp(-dot(d1,d1)/(0.014+mountainSize*0.09));
           float m2=exp(-dot(d2,d2)/(0.012+mountainSize*0.08));
           float m3=exp(-dot(d3,d3)/(0.011+mountainSize*0.07));
-          float ridgeNoise=0.12*sin((uv.x+uv.y)*26.0+time*0.28)+0.08*sin((uv.x-uv.y)*34.0-time*0.24);
-          float mountain=(m1*1.0+m2*0.82+m3*0.68+ridgeNoise*0.22)*mountainHeight;
+          float ridgeNoise=0.14*sin((uv.x+uv.y)*26.0+time*0.28)+0.1*sin((uv.x-uv.y)*34.0-time*0.24);
+          vec3 isoVor=voronoiShatter(uv+vec2(time*0.03,-time*0.026),6.0+reactiveVol*8.5);
+          float isoRidge=(1.0-smoothstep(0.0,0.03,isoVor.z))*0.26;
+          float mountain=(m1*1.0+m2*0.82+m3*0.68+ridgeNoise*0.26+isoRidge)*mountainHeight;
           float contourDensity=mix(16.0,34.0,reactiveVol);
           float contourMajor=(1.0-smoothstep(0.0,0.032,abs(fract(mountain*contourDensity)-0.5)))*0.56;
           float contourMinor=(1.0-smoothstep(0.0,0.018,abs(fract(mountain*contourDensity*0.46+0.18)-0.5)))*0.3;
           float contourRadial=(1.0-smoothstep(0.0,0.018,abs(fract((r*20.0+sin(a*3.0))*0.6)-0.5)))*0.2;
-          float contour=contourMajor+contourMinor+contourRadial;
+          float contourIrregular=(1.0-smoothstep(0.0,0.02,abs(fract((mountain+isoRidge*3.0)*(11.0+reactiveVol*9.0))-0.5)))*0.34;
+          float contour=contourMajor+contourMinor+contourRadial+contourIrregular;
           float contourIntent=0.16+flowAmt*0.62+bioMix*0.34+reactiveVol*0.2-shearAmt*0.1;
           float contourMask=smoothstep(0.32,0.84,contourIntent);
           vec2 mGrad=vec2(dFdx(mountain),dFdy(mountain));
@@ -933,6 +1367,19 @@ import { initMidiPlayer } from './midi-player.js';
             0.86+0.2*(1.0-smoothstep(0.0,0.34,abs(stripe-0.84)))
           );
           col*=mix(vec3(1.0),phosphor,0.26*subpixelMix+0.22*analogMix);
+
+          // Drum shock: instant monochrome inversion pulse (black -> white hit).
+          if(impactFlash>0.001){
+            float imp=smoothstep(0.0,1.0,impactFlash);
+            float mono=dot(col,vec3(0.299,0.587,0.114));
+            vec3 bw=vec3(mono);
+            vec3 inv=vec3(1.0-mono);
+            float rr=length((uv-0.5)*vec2(1.0,1.25));
+            float ring=exp(-pow((rr*2.9-(0.95-imp*0.5))*3.6,2.0));
+            col=mix(col,bw,imp*0.34);
+            col=mix(col,inv,imp*(0.6+0.2*ring));
+            col+=vec3(0.28,0.32,0.38)*imp*(0.35+0.65*ring);
+          }
 
           // Vignette + center lift: keep composition focused and readable
           float vig=1.0-smoothstep(0.14,0.92,length((uv-0.5)*1.74));
@@ -1255,6 +1702,92 @@ import { initMidiPlayer } from './midi-player.js';
     prismSpokeParticles.userData.basePos = spokePos.slice(0);
     scene.add(prismSpokeParticles);
 
+    // --- Three.js Piano Roll: point-line-surface runway integrated into core scene
+    roll3DGroup = new THREE.Group();
+    roll3DGroup.position.set(0, -0.32, 0.44);
+    roll3DGroup.rotation.x = -0.24;
+
+    const rollSurfaceGeo = new THREE.PlaneGeometry(1, 1);
+    const rollSurfaceMat = new THREE.MeshBasicMaterial({
+      color: 0xe6f3ff,
+      transparent: true,
+      opacity: 0.62,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexColors: true,
+      side: THREE.DoubleSide
+    });
+    roll3DSurfaces = new THREE.InstancedMesh(rollSurfaceGeo, rollSurfaceMat, ROLL3D_MAX_INSTANCES);
+    roll3DSurfaces.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    roll3DSurfaces.count = 0;
+    roll3DSurfaces.renderOrder = 620;
+    roll3DSurfaces.frustumCulled = false;
+    roll3DGroup.add(roll3DSurfaces);
+
+    const rollGlowMat = new THREE.MeshBasicMaterial({
+      color: 0xbfe8ff,
+      transparent: true,
+      opacity: 0.34,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexColors: true,
+      side: THREE.DoubleSide
+    });
+    roll3DGlowSurfaces = new THREE.InstancedMesh(rollSurfaceGeo, rollGlowMat, ROLL3D_MAX_INSTANCES);
+    roll3DGlowSurfaces.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    roll3DGlowSurfaces.count = 0;
+    roll3DGlowSurfaces.renderOrder = 619;
+    roll3DGlowSurfaces.frustumCulled = false;
+    roll3DGroup.add(roll3DGlowSurfaces);
+
+    const rollLineGeo = new THREE.BufferGeometry();
+    roll3DLinePosArray = new Float32Array(ROLL3D_MAX_LINES * 3);
+    roll3DLinePosAttr = new THREE.BufferAttribute(roll3DLinePosArray, 3);
+    roll3DLinePosAttr.setUsage(THREE.DynamicDrawUsage);
+    rollLineGeo.setAttribute('position', roll3DLinePosAttr);
+    roll3DLines = new THREE.LineSegments(
+      rollLineGeo,
+      new THREE.LineBasicMaterial({
+        color: 0xe5f4ff,
+        transparent: true,
+        opacity: 0.38,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
+    roll3DLines.geometry.setDrawRange(0, 0);
+    roll3DLines.renderOrder = 618;
+    roll3DLines.frustumCulled = false;
+    roll3DGroup.add(roll3DLines);
+
+    const rollPointGeo = new THREE.BufferGeometry();
+    roll3DPointPosArray = new Float32Array(ROLL3D_MAX_POINTS * 3);
+    roll3DPointColArray = new Float32Array(ROLL3D_MAX_POINTS * 3);
+    roll3DPointPosAttr = new THREE.BufferAttribute(roll3DPointPosArray, 3);
+    roll3DPointPosAttr.setUsage(THREE.DynamicDrawUsage);
+    roll3DPointColAttr = new THREE.BufferAttribute(roll3DPointColArray, 3);
+    roll3DPointColAttr.setUsage(THREE.DynamicDrawUsage);
+    rollPointGeo.setAttribute('position', roll3DPointPosAttr);
+    rollPointGeo.setAttribute('color', roll3DPointColAttr);
+    roll3DPoints = new THREE.Points(
+      rollPointGeo,
+      new THREE.PointsMaterial({
+        size: 0.0156,
+        transparent: true,
+        opacity: 0.62,
+        vertexColors: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true
+      })
+    );
+    roll3DPoints.geometry.setDrawRange(0, 0);
+    roll3DPoints.renderOrder = 622;
+    roll3DPoints.frustumCulled = false;
+    roll3DGroup.add(roll3DPoints);
+    if (rollOverlayScene) rollOverlayScene.add(roll3DGroup);
+    else scene.add(roll3DGroup);
+
     // --- Burst ring particles (positions updated in animate)
     const burstPos = [];
     for (let i = 0; i < BURST_RING_POINTS; i++) {
@@ -1338,6 +1871,10 @@ import { initMidiPlayer } from './midi-player.js';
       const w = window.innerWidth, h = window.innerHeight;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+      if (rollOverlayCamera) {
+        rollOverlayCamera.aspect = w / h;
+        rollOverlayCamera.updateProjectionMatrix();
+      }
       renderer.setSize(w, h);
       if (rtScene) rtScene.setSize(w, h);
       if (postQuad && postQuad.material.uniforms) postQuad.material.uniforms.resolution.value.set(w, h);
@@ -1352,7 +1889,7 @@ import { initMidiPlayer } from './midi-player.js';
   const sustainedVoices = new Map();
   let sustainPedalHeld = false;
   let visualFreezeUntil = 0;
-  let masterVolume = 0.4;
+  let masterVolume = 1.0;
   let helpOverlayEl = null;
   let helpOverlayVisible = false;
   // Idle auto-play: build → hold → decay (capped, no infinite stack)
@@ -1405,18 +1942,18 @@ import { initMidiPlayer } from './midi-player.js';
   // KEY_PROFILES visual personality tuning table:
   // contour / kaleido / radiation / symmetry / optical-lsd are balanced per key.
   const KEY_PROFILES = [
-    { name:'Contour Prime', folds:7,  hue:0.01, bloom:2.40, ca:0.0046, spiral:0.02, flow:0.92, pulse:0.16, shear:0.08, wave:0.32, glitch:0.04, mx:0, my:0, warp:0.32, prism:0.76, bio:0.30, rot:0.00, contrast:2.20, in:0.90, out:0.60 },
-    { name:'Glass Mandala', folds:28, hue:0.54, bloom:2.90, ca:0.0058, spiral:0.03, flow:0.18, pulse:0.26, shear:0.12, wave:0.14, glitch:0.05, mx:0, my:0, warp:0.26, prism:1.02, bio:0.34, rot:0.24, contrast:2.18, in:0.90, out:0.58 },
-    { name:'Bio Topography', folds:4, hue:0.30, bloom:2.55, ca:0.0044, spiral:0.04, flow:0.82, pulse:0.66, shear:0.16, wave:0.34, glitch:0.08, mx:0, my:0, warp:0.46, prism:0.74, bio:0.92, rot:-0.10, contrast:2.06, in:0.90, out:0.58 },
-    { name:'Prism Matrix',  folds:3,  hue:0.63, bloom:1.74, ca:0.0052, spiral:0.02, flow:0.22, pulse:0.20, shear:1.00, wave:0.26, glitch:0.52, mx:1, my:1, warp:0.30, prism:0.94, bio:0.24, rot:0.30, contrast:2.42, in:0.92, out:0.62 },
-    { name:'Pulse Heart',   folds:6,  hue:0.95, bloom:3.12, ca:0.0054, spiral:0.03, flow:0.30, pulse:1.00, shear:0.12, wave:0.36, glitch:0.06, mx:0, my:0, warp:0.54, prism:0.78, bio:0.64, rot:-0.06, contrast:2.30, in:0.90, out:0.58 },
-    { name:'Symmetry City', folds:0,  hue:0.58, bloom:1.38, ca:0.0034, spiral:0.01, flow:0.14, pulse:0.18, shear:0.96, wave:0.24, glitch:0.50, mx:1, my:1, warp:0.24, prism:0.82, bio:0.16, rot:0.34, contrast:2.40, in:0.92, out:0.64 },
-    { name:'LSD Couture',   folds:17, hue:0.09, bloom:2.96, ca:0.0061, spiral:0.07, flow:0.56, pulse:0.48, shear:0.30, wave:0.46, glitch:0.28, mx:0, my:0, warp:0.66, prism:1.04, bio:0.72, rot:-0.20, contrast:2.22, in:0.90, out:0.58 },
-    { name:'Crystal Mirror',folds:32, hue:0.72, bloom:3.04, ca:0.0062, spiral:0.02, flow:0.20, pulse:0.42, shear:0.24, wave:0.28, glitch:0.08, mx:1, my:0, warp:0.38, prism:1.06, bio:0.38, rot:0.26, contrast:2.14, in:0.90, out:0.58 },
-    { name:'Radial Matrix', folds:2,  hue:0.42, bloom:1.98, ca:0.0042, spiral:0.03, flow:0.70, pulse:0.34, shear:0.46, wave:0.96, glitch:0.30, mx:1, my:0, warp:0.72, prism:0.74, bio:0.54, rot:-0.22, contrast:2.32, in:0.90, out:0.58 },
-    { name:'Axis Lattice',  folds:11, hue:0.18, bloom:2.48, ca:0.0048, spiral:0.05, flow:0.34, pulse:0.40, shear:0.56, wave:0.30, glitch:0.24, mx:1, my:0, warp:0.44, prism:0.88, bio:0.34, rot:0.40, contrast:2.26, in:0.92, out:0.60 },
-    { name:'Scan Luxe',     folds:0,  hue:0.02, bloom:2.04, ca:0.0064, spiral:0.01, flow:0.42, pulse:0.72, shear:0.34, wave:0.20, glitch:0.78, mx:0, my:0, warp:0.60, prism:0.82, bio:0.30, rot:-0.30, contrast:2.48, in:0.94, out:0.64 },
-    { name:'Helix Tissue',  folds:14, hue:0.88, bloom:2.78, ca:0.0051, spiral:0.06, flow:0.38, pulse:0.62, shear:0.20, wave:0.52, glitch:0.12, mx:0, my:0, warp:0.68, prism:0.96, bio:0.80, rot:0.16, contrast:2.12, in:0.90, out:0.58 },
+    { name:'Contour Vector', folds:8, hue:0.02, bloom:2.44, ca:0.0038, spiral:0.01, flow:0.88, pulse:0.26, shear:0.12, wave:0.24, glitch:0.05, mx:0, my:0, warp:0.34, prism:0.82, bio:0.28, rot:0.02, contrast:2.38, in:0.96, out:0.70 },
+    { name:'Optic Axis', folds:12, hue:0.56, bloom:2.58, ca:0.0044, spiral:0.02, flow:0.36, pulse:0.32, shear:0.34, wave:0.22, glitch:0.08, mx:0, my:0, warp:0.30, prism:0.98, bio:0.30, rot:0.18, contrast:2.44, in:0.96, out:0.70 },
+    { name:'Bio Relief', folds:7, hue:0.31, bloom:2.48, ca:0.0040, spiral:0.03, flow:0.72, pulse:0.58, shear:0.18, wave:0.36, glitch:0.08, mx:0, my:0, warp:0.48, prism:0.86, bio:0.84, rot:-0.06, contrast:2.34, in:0.95, out:0.68 },
+    { name:'Prism Grid', folds:10, hue:0.63, bloom:2.36, ca:0.0048, spiral:0.01, flow:0.42, pulse:0.24, shear:0.82, wave:0.30, glitch:0.20, mx:1, my:0, warp:0.36, prism:1.02, bio:0.24, rot:0.22, contrast:2.66, in:0.97, out:0.72 },
+    { name:'Pulse Ridge', folds:9, hue:0.95, bloom:2.76, ca:0.0046, spiral:0.02, flow:0.40, pulse:0.94, shear:0.20, wave:0.30, glitch:0.06, mx:0, my:0, warp:0.58, prism:0.88, bio:0.56, rot:-0.04, contrast:2.52, in:0.95, out:0.68 },
+    { name:'Mirror Matrix', folds:11, hue:0.58, bloom:2.18, ca:0.0036, spiral:0.00, flow:0.30, pulse:0.22, shear:0.88, wave:0.26, glitch:0.22, mx:1, my:1, warp:0.28, prism:0.9, bio:0.2, rot:0.28, contrast:2.7, in:0.97, out:0.72 },
+    { name:'Couture Spectrum', folds:14, hue:0.09, bloom:2.82, ca:0.0052, spiral:0.04, flow:0.62, pulse:0.44, shear:0.36, wave:0.42, glitch:0.18, mx:0, my:0, warp:0.72, prism:1.06, bio:0.66, rot:-0.14, contrast:2.58, in:0.96, out:0.7 },
+    { name:'Crystal Loom', folds:16, hue:0.72, bloom:2.86, ca:0.0050, spiral:0.01, flow:0.34, pulse:0.38, shear:0.3, wave:0.28, glitch:0.08, mx:1, my:0, warp:0.42, prism:1.04, bio:0.34, rot:0.2, contrast:2.48, in:0.96, out:0.7 },
+    { name:'Radial Frame', folds:6, hue:0.42, bloom:2.3, ca:0.0040, spiral:0.02, flow:0.76, pulse:0.38, shear:0.5, wave:0.84, glitch:0.16, mx:1, my:0, warp:0.66, prism:0.84, bio:0.48, rot:-0.16, contrast:2.56, in:0.95, out:0.68 },
+    { name:'Metro Symmetry', folds:13, hue:0.18, bloom:2.52, ca:0.0042, spiral:0.03, flow:0.46, pulse:0.4, shear:0.58, wave:0.32, glitch:0.14, mx:1, my:0, warp:0.46, prism:0.94, bio:0.32, rot:0.3, contrast:2.6, in:0.97, out:0.72 },
+    { name:'Scan Flux', folds:9, hue:0.02, bloom:2.34, ca:0.0052, spiral:0.00, flow:0.5, pulse:0.66, shear:0.32, wave:0.24, glitch:0.28, mx:0, my:0, warp:0.56, prism:0.9, bio:0.28, rot:-0.2, contrast:2.74, in:0.98, out:0.72 },
+    { name:'Helix Field', folds:15, hue:0.88, bloom:2.7, ca:0.0046, spiral:0.03, flow:0.5, pulse:0.56, shear:0.24, wave:0.48, glitch:0.1, mx:0, my:0, warp:0.7, prism:1.0, bio:0.78, rot:0.12, contrast:2.46, in:0.96, out:0.7 },
   ];
   let activeProfile = KEY_PROFILES[0];
   // Head tracking state
@@ -1830,12 +2367,63 @@ import { initMidiPlayer } from './midi-player.js';
     KeyQ: 'Q', KeyW: 'W', KeyE: 'E', KeyR: 'R', KeyT: 'T', KeyY: 'Y', KeyU: 'U', KeyI: 'I', KeyO: 'O', KeyP: 'P',
     BracketLeft: '[', BracketRight: ']'
   };
-  // Drums: middle row A–L + ; and ' (11 pads, 2020s kit)
+  // Drums: middle row A–L + ; ' \ (12 pads, 2020s kit)
   const DRUM_KEYS = {
     KeyA: 'kick', KeyS: 'snare', KeyD: '808', KeyF: 'clap', KeyG: 'hatClosed', KeyH: 'hatOpen',
-    KeyJ: 'rim', KeyK: 'snap', KeyL: 'tomLow', Semicolon: 'tomMid', Quote: 'ride'
+    KeyJ: 'rim', KeyK: 'snap', KeyL: 'tomLow', Semicolon: 'tomMid', Quote: 'ride', Backslash: 'crash'
   };
-  const DRUM_KEY_ORDER = ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL', 'Semicolon', 'Quote'];
+  const DRUM_KEY_ORDER = ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL', 'Semicolon', 'Quote', 'Backslash'];
+  function gmDrumToType(midi) {
+    const m = Math.max(0, Math.min(127, Math.round(midi || 0)));
+    if (m === 35 || m === 36) return 'kick';
+    if (m === 37) return 'rim';
+    if (m === 38 || m === 40) return 'snare';
+    if (m === 39) return 'clap';
+    if (m === 41 || m === 43) return 'tomLow';
+    if (m === 45 || m === 47) return 'tomMid';
+    if (m === 42 || m === 44) return 'hatClosed';
+    if (m === 46) return 'hatOpen';
+    if (m === 49 || m === 57) return 'crash';
+    if (m === 51 || m === 59) return 'ride';
+    if (m >= 27 && m <= 34) return '808';
+    return 'snap';
+  }
+  function gmDrumVariant(midi) {
+    const m = Math.max(0, Math.min(127, Math.round(midi || 0)));
+    if (m === 35) return 'kick_deep';
+    if (m === 36) return 'kick_punch';
+    if (m === 37) return 'rim_wood';
+    if (m === 38) return 'snare_acoustic';
+    if (m === 39) return 'clap_wide';
+    if (m === 40) return 'snare_tight';
+    if (m === 41) return 'tom_floor';
+    if (m === 42) return 'hat_closed_tight';
+    if (m === 43) return 'tom_floor_bright';
+    if (m === 44) return 'hat_pedal';
+    if (m === 45) return 'tom_mid_round';
+    if (m === 46) return 'hat_open_short';
+    if (m === 47) return 'tom_mid_tight';
+    if (m === 48) return 'tom_high_round';
+    if (m === 49) return 'crash_bright';
+    if (m === 50) return 'tom_high_tight';
+    if (m === 51) return 'ride_bright';
+    if (m === 52) return 'crash_soft';
+    if (m === 53) return 'ride_bell';
+    if (m === 55) return 'crash_splash';
+    if (m === 57) return 'crash_dark';
+    if (m === 59) return 'ride_dark';
+    if (m >= 27 && m <= 30) return '808_sub';
+    if (m >= 31 && m <= 34) return '808_click';
+    return 'snap_dry';
+  }
+  function drumTypeToVisualIndex(type) {
+    const t = String(type || '').toLowerCase();
+    const map = {
+      kick: 0, snare: 1, '808': 2, clap: 3, hatclosed: 4, hatopen: 5,
+      rim: 6, snap: 7, tomlow: 8, tommid: 9, ride: 10, crash: 11
+    };
+    return map[t] != null ? map[t] : 7;
+  }
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   function midiToNoteName(midi) {
     const oct = Math.floor(midi / 12) - 1;
@@ -1856,8 +2444,11 @@ import { initMidiPlayer } from './midi-player.js';
   let limiter = null;
   let mixAutoGain = null;
   let outputBusGain = null;
-  let drumGain = null; // drums route into the same premium bus for timbre consistency
+  let drumGain = null;
+  let drumDryBus = null;
   let leadDriveCurve = null;
+  let activeLeadVoices = 0;
+  let activeDrumVoices = 0;
   let chordCount = 0; // how many notes active simultaneously
 
   function initAudio() {
@@ -1872,9 +2463,9 @@ import { initMidiPlayer } from './midi-player.js';
     compressor.release.value = 0.18;
 
     limiter = audioCtx.createDynamicsCompressor();
-    limiter.threshold.value = -7.2;
+    limiter.threshold.value = -8.2;
     limiter.knee.value = 0.2;
-    limiter.ratio.value = 28;
+    limiter.ratio.value = 30;
     limiter.attack.value = 0.001;
     limiter.release.value = 0.16;
 
@@ -1882,6 +2473,8 @@ import { initMidiPlayer } from './midi-player.js';
     masterGain.gain.value = masterVolume;
     drumGain = audioCtx.createGain();
     drumGain.gain.value = masterVolume;
+    drumDryBus = audioCtx.createGain();
+    drumDryBus.gain.value = 0.9;
     mixAutoGain = audioCtx.createGain();
     mixAutoGain.gain.value = 1.0;
 
@@ -1932,10 +2525,43 @@ import { initMidiPlayer } from './midi-player.js';
     toneSilk.gain.value = 0.35;
 
     outputBusGain = audioCtx.createGain();
-    outputBusGain.gain.value = 0.84;
+    // Instrument bus +20% as requested (post-limiter synth path only).
+    outputBusGain.gain.value = 0.972;
 
-    masterGain.connect(mixAutoGain);
-    drumGain.connect(mixAutoGain);
+    const synthSaturator = audioCtx.createWaveShaper();
+    const synthSatCurve = new Float32Array(1024);
+    for (let i = 0; i < synthSatCurve.length; i++) {
+      const x = (i / (synthSatCurve.length - 1)) * 2 - 1;
+      synthSatCurve[i] = Math.tanh(x * 0.82) * 0.985;
+    }
+    synthSaturator.curve = synthSatCurve;
+    synthSaturator.oversample = '4x';
+    const synthTrim = audioCtx.createGain();
+    synthTrim.gain.value = 0.94;
+
+    // Drum path is fully dry/instant (no chorus/reverb/ping delay tails).
+    const drumTightHP = audioCtx.createBiquadFilter();
+    drumTightHP.type = 'highpass';
+    drumTightHP.frequency.value = 34;
+    drumTightHP.Q.value = 0.62;
+    const drumTightLP = audioCtx.createBiquadFilter();
+    drumTightLP.type = 'lowpass';
+    drumTightLP.frequency.value = 14800;
+    drumTightLP.Q.value = 0.55;
+    const drumPunch = audioCtx.createDynamicsCompressor();
+    drumPunch.threshold.value = -14;
+    drumPunch.knee.value = 6;
+    drumPunch.ratio.value = 3.4;
+    drumPunch.attack.value = 0.002;
+    drumPunch.release.value = 0.09;
+
+    masterGain.connect(synthSaturator);
+    synthSaturator.connect(synthTrim);
+    synthTrim.connect(mixAutoGain);
+    drumGain.connect(drumTightHP);
+    drumTightHP.connect(drumTightLP);
+    drumTightLP.connect(drumPunch);
+    drumPunch.connect(drumDryBus);
     mixAutoGain.connect(toneHighpass);
     toneHighpass.connect(toneLowShelf);
     toneLowShelf.connect(color);
@@ -1974,33 +2600,33 @@ import { initMidiPlayer } from './midi-player.js';
     chorusLfoGain.connect(chorusDelay2.delayTime);
     chorusLfo.start();
 
-    // Reverb network: shorter, cleaner tail.
-    const rev1 = audioCtx.createDelay(1); rev1.delayTime.value = 0.13;
-    const rev2 = audioCtx.createDelay(1); rev2.delayTime.value = 0.18;
-    const rev3 = audioCtx.createDelay(1); rev3.delayTime.value = 0.25;
-    const revFb1 = audioCtx.createGain(); revFb1.gain.value = 0.22;
-    const revFb2 = audioCtx.createGain(); revFb2.gain.value = 0.2;
-    const revFb3 = audioCtx.createGain(); revFb3.gain.value = 0.18;
+    // Reverb network: richer but still clean for dense chords.
+    const rev1 = audioCtx.createDelay(1); rev1.delayTime.value = 0.16;
+    const rev2 = audioCtx.createDelay(1); rev2.delayTime.value = 0.23;
+    const rev3 = audioCtx.createDelay(1); rev3.delayTime.value = 0.31;
+    const revFb1 = audioCtx.createGain(); revFb1.gain.value = 0.28;
+    const revFb2 = audioCtx.createGain(); revFb2.gain.value = 0.25;
+    const revFb3 = audioCtx.createGain(); revFb3.gain.value = 0.22;
     rev1.connect(revFb1); revFb1.connect(rev1); // feedback loops
     rev2.connect(revFb2); revFb2.connect(rev2);
     rev3.connect(revFb3); revFb3.connect(rev3);
     const revFilter = audioCtx.createBiquadFilter();
-    revFilter.type = 'lowpass'; revFilter.frequency.value = 5200;
-    const revGain = audioCtx.createGain(); revGain.gain.value = 0.014;
+    revFilter.type = 'lowpass'; revFilter.frequency.value = 6200;
+    const revGain = audioCtx.createGain(); revGain.gain.value = 0.027;
     outputBusGain.connect(rev1); outputBusGain.connect(rev2); outputBusGain.connect(rev3);
     rev1.connect(revFilter); rev2.connect(revFilter); rev3.connect(revFilter);
     revFilter.connect(revGain);
     reverbNode = revGain;
 
     // High-end ping-pong shimmer: filtered echoes for richer sustain without muddy tails.
-    const pingSend = audioCtx.createGain(); pingSend.gain.value = 0.07;
+    const pingSend = audioCtx.createGain(); pingSend.gain.value = 0.042;
     const pingL = audioCtx.createDelay(0.8); pingL.delayTime.value = 0.19;
     const pingR = audioCtx.createDelay(0.8); pingR.delayTime.value = 0.27;
     const pingFbL = audioCtx.createGain(); pingFbL.gain.value = 0.19;
     const pingFbR = audioCtx.createGain(); pingFbR.gain.value = 0.17;
     const pingHP = audioCtx.createBiquadFilter(); pingHP.type = 'highpass'; pingHP.frequency.value = 980;
     const pingLP = audioCtx.createBiquadFilter(); pingLP.type = 'lowpass'; pingLP.frequency.value = 6400;
-    const pingOut = audioCtx.createGain(); pingOut.gain.value = 0.09;
+    const pingOut = audioCtx.createGain(); pingOut.gain.value = 0.062;
     outputBusGain.connect(pingSend);
     pingSend.connect(pingL);
     pingSend.connect(pingR);
@@ -2012,222 +2638,292 @@ import { initMidiPlayer } from './midi-player.js';
     pingLP.connect(pingOut);
 
     // Final mix to destination.
-    const dryGain = audioCtx.createGain(); dryGain.gain.value = 0.72;
+    const dryGain = audioCtx.createGain(); dryGain.gain.value = 0.66;
     outputBusGain.connect(dryGain);
     dryGain.connect(audioCtx.destination);
+    drumDryBus.connect(audioCtx.destination);
     merger.connect(audioCtx.destination);
     revGain.connect(audioCtx.destination);
     pingOut.connect(audioCtx.destination);
   }
 
-  // --- Modern 2020s-style procedural drums (not overwhelming; sit in mix) ---
-  const DRUM_GAIN = 0.5; // keep drums subtle so synth and ambient stay forward
-  function playDrum(type) {
+  // --- Procedural drums ---
+  // Drum bus -30% as requested.
+  const DRUM_GAIN = 0.2778;
+  const drumNoiseCache = new Map();
+  function getDrumNoiseBuffer(durationSec, shape) {
+    if (!audioCtx) return null;
+    const dur = Math.max(0.01, durationSec);
+    const key = `${dur.toFixed(4)}|${shape || 'lin'}`;
+    if (drumNoiseCache.has(key)) return drumNoiseCache.get(key);
+    const size = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
+    const buf = audioCtx.createBuffer(1, size, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / Math.max(1, data.length - 1);
+      const env = shape === 'exp' ? Math.exp(-t * 5.4) : (1 - t);
+      data[i] = (Math.random() * 2 - 1) * env;
+    }
+    drumNoiseCache.set(key, buf);
+    return buf;
+  }
+  function playDrum(type, opts) {
     if (!audioCtx || !drumGain) return;
-    const now = audioCtx.currentTime;
+    const o = opts || {};
+    const variant = String(
+      o.variant || (o.midiNote != null ? gmDrumVariant(o.midiNote) : '')
+    ).toLowerCase();
+    const hasVar = (tag) => variant.indexOf(String(tag || '').toLowerCase()) !== -1;
+    const nowBase = audioCtx.currentTime;
+    const reqStart = o.startTime != null ? o.startTime : nowBase + 0.0001;
+    const now = Math.max(nowBase + 0.0001, reqStart);
+    const vel = clamp01(o.velocity != null ? o.velocity : 0.9);
+    activeDrumVoices = Math.min(48, activeDrumVoices + 1);
+    const loadTrim = 1 / Math.pow(Math.max(1, activeDrumVoices), o.fromMIDI ? 0.24 : 0.2);
+    const level = DRUM_GAIN * (0.58 + vel * 0.58) * loadTrim * (o.fromMIDI ? 0.9 : 1.0);
     const gain = audioCtx.createGain();
-    gain.gain.value = 0;
+    gain.gain.setValueAtTime(0.0001, Math.max(0, now - 0.0001));
     gain.connect(drumGain);
+    let maxTail = 0.12;
+    let cleaned = false;
+    function setTail(sec) {
+      maxTail = Math.max(maxTail, sec);
+    }
+    function cleanupAt(absTime) {
+      const tailAt = Math.max(now + 0.02, absTime || (now + maxTail));
+      gain.gain.cancelScheduledValues(tailAt);
+      gain.gain.setTargetAtTime(0.0001, tailAt, 0.018);
+      const cleanupMs = Math.max(20, (tailAt - nowBase + 0.22) * 1000);
+      setTimeout(() => {
+        if (cleaned) return;
+        cleaned = true;
+        try { gain.disconnect(); } catch (_) {}
+        activeDrumVoices = Math.max(0, activeDrumVoices - 1);
+      }, cleanupMs);
+    }
 
-    function noiseBurst(duration, filterFreq, type) {
-      const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * duration, audioCtx.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+    function noiseBurst(duration, filterFreq, filterType, shape, startOffset) {
+      const off = startOffset || 0;
+      const start = now + off;
       const src = audioCtx.createBufferSource();
-      src.buffer = buf;
+      src.buffer = getDrumNoiseBuffer(duration, shape);
+      if (!src.buffer) return;
       const filter = audioCtx.createBiquadFilter();
-      filter.type = type || 'highpass';
-      filter.frequency.value = filterFreq;
+      filter.type = filterType || 'highpass';
+      filter.frequency.setValueAtTime(filterFreq, start);
       src.connect(filter);
       filter.connect(gain);
-      src.start(now);
-      src.stop(now + duration);
+      src.start(start);
+      src.stop(start + duration);
+      setTail(off + duration);
     }
 
     switch (type) {
       case 'kick': {
-        gain.gain.setValueAtTime(0.85 * DRUM_GAIN, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.28);
-        noiseBurst(0.02, 200, 'highpass');
+        let atk = 146;
+        let mid = 54;
+        let end = 33;
+        let tail = 0.26;
+        let transientHz = 180;
+        let transientDur = 0.016;
+        if (hasVar('deep') || hasVar('sub')) {
+          atk = 122; mid = 46; end = 28; tail = 0.34; transientHz = 130; transientDur = 0.012;
+        } else if (hasVar('tight')) {
+          atk = 176; mid = 86; end = 48; tail = 0.19; transientHz = 280; transientDur = 0.01;
+        } else if (hasVar('punch')) {
+          atk = 160; mid = 62; end = 36; tail = 0.24; transientHz = 240; transientDur = 0.014;
+        }
+        gain.gain.setValueAtTime(level * 0.96, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + tail);
+        noiseBurst(transientDur, transientHz, 'highpass', 'lin');
+        if (hasVar('click') || hasVar('beater') || hasVar('punch')) {
+          noiseBurst(0.007, 2600, 'highpass', 'lin', 0.0008);
+        }
         const osc = audioCtx.createOscillator();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(150, now);
-        osc.frequency.exponentialRampToValueAtTime(45, now + 0.08);
-        osc.frequency.exponentialRampToValueAtTime(30, now + 0.25);
+        osc.frequency.setValueAtTime(atk, now);
+        osc.frequency.exponentialRampToValueAtTime(mid, now + 0.072);
+        osc.frequency.exponentialRampToValueAtTime(end, now + Math.max(0.12, tail - 0.01));
         osc.connect(gain);
         osc.start(now);
-        osc.stop(now + 0.3);
+        osc.stop(now + tail + 0.03);
+        setTail(tail + 0.03);
         break;
       }
       case 'snare': {
-        noiseBurst(0.12, 800, 'highpass');
+        let bodyStart = 196;
+        let bodyEnd = 92;
+        let bodyDur = 0.14;
+        let noiseDur = 0.12;
+        let noiseHz = 940;
+        let gainTail = 0.13;
+        if (hasVar('tight') || hasVar('electro')) {
+          bodyStart = 224; bodyEnd = 120; bodyDur = 0.1; noiseDur = 0.09; noiseHz = 1250; gainTail = 0.1;
+        } else if (hasVar('acoustic')) {
+          bodyStart = 182; bodyEnd = 86; bodyDur = 0.15; noiseDur = 0.14; noiseHz = 860; gainTail = 0.15;
+        }
+        noiseBurst(noiseDur, noiseHz, 'highpass', 'exp');
         const body = audioCtx.createOscillator();
         body.type = 'triangle';
-        body.frequency.setValueAtTime(180, now);
-        body.frequency.exponentialRampToValueAtTime(80, now + 0.1);
+        body.frequency.setValueAtTime(bodyStart, now);
+        body.frequency.exponentialRampToValueAtTime(bodyEnd, now + Math.max(0.05, bodyDur - 0.04));
         body.connect(gain);
-        gain.gain.setValueAtTime(0.6 * DRUM_GAIN, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.14);
+        gain.gain.setValueAtTime(level * 0.7, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + gainTail);
         body.start(now);
-        body.stop(now + 0.15);
+        body.stop(now + bodyDur);
+        setTail(Math.max(bodyDur, gainTail));
         break;
       }
       case '808': {
+        let f0 = 70;
+        let f1 = 42;
+        let f2 = 30;
+        let tail = 0.54;
+        if (hasVar('sub')) {
+          f0 = 58; f1 = 36; f2 = 24; tail = 0.72;
+        } else if (hasVar('click')) {
+          f0 = 84; f1 = 52; f2 = 36; tail = 0.42;
+          noiseBurst(0.01, 2200, 'highpass', 'lin', 0.0);
+        }
         const osc = audioCtx.createOscillator();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(65, now);
-        osc.frequency.exponentialRampToValueAtTime(45, now + 0.06);
-        osc.frequency.exponentialRampToValueAtTime(32, now + 0.5);
+        osc.frequency.setValueAtTime(f0, now);
+        osc.frequency.exponentialRampToValueAtTime(f1, now + 0.06);
+        osc.frequency.exponentialRampToValueAtTime(f2, now + Math.max(0.34, tail - 0.04));
         osc.connect(gain);
-        gain.gain.setValueAtTime(0.75 * DRUM_GAIN, now);
-        gain.gain.exponentialRampToValueAtTime(0.35 * DRUM_GAIN, now + 0.05);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.55);
+        gain.gain.setValueAtTime(level * 0.8, now);
+        gain.gain.exponentialRampToValueAtTime(level * 0.32, now + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + tail);
         osc.start(now);
-        osc.stop(now + 0.6);
+        osc.stop(now + tail + 0.04);
+        setTail(tail + 0.04);
         break;
       }
       case 'clap': {
-        for (let i = 0; i < 5; i++) {
-          const t = now + i * 0.012;
-          const b = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.06, audioCtx.sampleRate);
-          const d = b.getChannelData(0);
-          for (let j = 0; j < d.length; j++) d[j] = (Math.random() * 2 - 1) * Math.exp(-j / (d.length * 0.15));
+        const wide = hasVar('wide');
+        gain.gain.setValueAtTime(level * (wide ? 0.6 : 0.56), now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + (wide ? 0.14 : 0.11));
+        const layers = wide ? 5 : 4;
+        for (let i = 0; i < layers; i++) {
+          const t = now + i * 0.01;
           const src = audioCtx.createBufferSource();
-          src.buffer = b;
-          const f = audioCtx.createBiquadFilter();
-          f.type = 'highpass';
-          f.frequency.value = 600;
-          src.connect(f);
-          f.connect(gain);
+          src.buffer = getDrumNoiseBuffer(0.055, 'exp');
+          const hp = audioCtx.createBiquadFilter();
+          hp.type = 'highpass';
+          hp.frequency.setValueAtTime(wide ? 520 : 620, t);
+          src.connect(hp);
+          hp.connect(gain);
           src.start(t);
-          src.stop(t + 0.06);
+          src.stop(t + 0.055);
+          setTail((i * 0.01) + 0.055);
         }
-        gain.gain.setValueAtTime(0.5 * DRUM_GAIN, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
         break;
       }
       case 'hatClosed': {
-        const b = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.05, audioCtx.sampleRate);
-        const d = b.getChannelData(0);
-        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
-        const src = audioCtx.createBufferSource();
-        src.buffer = b;
-        const f = audioCtx.createBiquadFilter();
-        f.type = 'highpass';
-        f.frequency.value = 7000;
-        f.Q.value = 0.5;
-        src.connect(f);
-        f.connect(gain);
-        gain.gain.setValueAtTime(0.4 * DRUM_GAIN, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
-        src.start(now);
-        src.stop(now + 0.05);
+        const pedal = hasVar('pedal');
+        const tight = hasVar('tight');
+        const dur = pedal ? 0.028 : (tight ? 0.034 : 0.046);
+        const hz = pedal ? 6200 : (tight ? 8600 : 7600);
+        gain.gain.setValueAtTime(level * (pedal ? 0.4 : 0.46), now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + dur);
+        noiseBurst(dur + 0.008, hz, 'highpass', 'lin');
         break;
       }
       case 'hatOpen': {
-        const b = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.2, audioCtx.sampleRate);
-        const d = b.getChannelData(0);
-        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (d.length * 2.5));
-        const src = audioCtx.createBufferSource();
-        src.buffer = b;
-        const f = audioCtx.createBiquadFilter();
-        f.type = 'bandpass';
-        f.frequency.value = 9000;
-        f.Q.value = 1;
-        src.connect(f);
-        f.connect(gain);
-        gain.gain.setValueAtTime(0.35 * DRUM_GAIN, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
-        src.start(now);
-        src.stop(now + 0.2);
+        const shortOpen = hasVar('short');
+        const dur = shortOpen ? 0.12 : 0.19;
+        gain.gain.setValueAtTime(level * 0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + (shortOpen ? 0.12 : 0.17));
+        noiseBurst(dur, shortOpen ? 9400 : 8800, 'bandpass', 'exp');
         break;
       }
       case 'rim': {
+        gain.gain.setValueAtTime(level * 0.56, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.038);
         const osc = audioCtx.createOscillator();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(900, now);
-        osc.frequency.exponentialRampToValueAtTime(400, now + 0.03);
+        osc.frequency.setValueAtTime(980, now);
+        osc.frequency.exponentialRampToValueAtTime(420, now + 0.028);
         osc.connect(gain);
-        gain.gain.setValueAtTime(0.5 * DRUM_GAIN, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
         osc.start(now);
-        osc.stop(now + 0.05);
-        noiseBurst(0.015, 2000, 'highpass');
+        osc.stop(now + 0.038);
+        noiseBurst(0.012, 2200, 'highpass', 'lin');
         break;
       }
       case 'snap': {
-        const b = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.04, audioCtx.sampleRate);
-        const d = b.getChannelData(0);
-        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
-        const src = audioCtx.createBufferSource();
-        src.buffer = b;
-        const f = audioCtx.createBiquadFilter();
-        f.type = 'highpass';
-        f.frequency.value = 1200;
-        src.connect(f);
-        f.connect(gain);
-        gain.gain.setValueAtTime(0.55 * DRUM_GAIN, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.035);
-        src.start(now);
-        src.stop(now + 0.04);
+        gain.gain.setValueAtTime(level * 0.58, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.03);
+        noiseBurst(0.036, 1400, 'highpass', 'lin');
         break;
       }
       case 'tomLow': {
+        const floor = hasVar('floor');
+        const startFreq = floor ? 94 : 108;
+        const endFreq = floor ? 46 : 56;
+        const dur = floor ? 0.24 : 0.2;
+        gain.gain.setValueAtTime(level * 0.66, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + (floor ? 0.22 : 0.18));
         const osc = audioCtx.createOscillator();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(100, now);
-        osc.frequency.exponentialRampToValueAtTime(55, now + 0.15);
+        osc.frequency.setValueAtTime(startFreq, now);
+        osc.frequency.exponentialRampToValueAtTime(endFreq, now + 0.14);
         osc.connect(gain);
-        gain.gain.setValueAtTime(0.6 * DRUM_GAIN, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
         osc.start(now);
-        osc.stop(now + 0.22);
+        osc.stop(now + dur);
+        setTail(dur);
         break;
       }
       case 'tomMid': {
+        const highTom = hasVar('high');
+        gain.gain.setValueAtTime(level * 0.6, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + (highTom ? 0.12 : 0.14));
         const osc = audioCtx.createOscillator();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(160, now);
-        osc.frequency.exponentialRampToValueAtTime(90, now + 0.12);
+        osc.frequency.setValueAtTime(highTom ? 220 : 170, now);
+        osc.frequency.exponentialRampToValueAtTime(highTom ? 118 : 94, now + 0.11);
         osc.connect(gain);
-        gain.gain.setValueAtTime(0.55 * DRUM_GAIN, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.16);
         osc.start(now);
-        osc.stop(now + 0.18);
+        osc.stop(now + (highTom ? 0.13 : 0.16));
         break;
       }
       case 'ride': {
-        gain.gain.setValueAtTime(0.38 * DRUM_GAIN, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.32);
-        const b = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.35, audioCtx.sampleRate);
-        const d = b.getChannelData(0);
-        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (d.length * 3));
-        const src = audioCtx.createBufferSource();
-        src.buffer = b;
-        const f = audioCtx.createBiquadFilter();
-        f.type = 'bandpass';
-        f.frequency.value = 10000;
-        f.Q.value = 2;
-        src.connect(f);
-        f.connect(gain);
-        src.start(now);
-        src.stop(now + 0.35);
-        const osc2 = audioCtx.createOscillator();
-        osc2.type = 'sine';
-        osc2.frequency.value = 5800;
-        osc2.connect(gain);
-        osc2.start(now);
-        osc2.stop(now + 0.25);
+        const bell = hasVar('bell');
+        const dark = hasVar('dark');
+        gain.gain.setValueAtTime(level * 0.42, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        noiseBurst(0.32, dark ? 8600 : 9900, 'bandpass', 'exp');
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(bell ? 6900 : (dark ? 4900 : 5600), now);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.22);
+        setTail(0.32);
         break;
       }
-      default:
+      case 'crash': {
+        const splash = hasVar('splash');
+        const dark = hasVar('dark');
+        gain.gain.setValueAtTime(level * 0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + (splash ? 0.24 : 0.42));
+        noiseBurst(splash ? 0.26 : 0.45, dark ? 6200 : 7200, 'bandpass', 'exp');
         break;
+      }
+      default: {
+        gain.gain.setValueAtTime(level * 0.54, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+        noiseBurst(0.05, 1800, 'highpass', 'lin');
+      }
     }
+    cleanupAt(now + maxTail);
   }
 
   function triggerVisualsForDrum(drumIndex) {
     initGPGPU();
-    const col = drumIndex % GRID_COLS;
+    const now = performance.now() * 0.001;
+    const idx = Math.max(0, Math.min(11, drumIndex | 0));
+    const col = idx % GRID_COLS;
     const row = 1;
     const pos = cellToPosition3D(col, row);
     attractor.x = pos.x;
@@ -2253,7 +2949,40 @@ import { initMidiPlayer } from './midi-player.js';
     tgtContrast = activeProfile.contrast;
     tgtBio = activeProfile.bio ?? 0.35;
     tgtProfileRoll = activeProfile.rot ?? 0;
-    burstRingTime = performance.now() * 0.001;
+    burstRingTime = now;
+    if (idx === 0) lastKickImpact = now;
+    else lastDrumMinorImpact = now;
+    pushRollImpulse(36 + idx * 2, 1.0, 'D');
+    pushRollDrumImpulse(idx, 1.0, 'D');
+  }
+
+  function triggerVisualsForMidiDrum(drumMidi, drumType, velocity, drumVariant) {
+    initGPGPU();
+    const now = performance.now() * 0.001;
+    const resolvedType = drumType || gmDrumToType(drumMidi);
+    const idx = drumTypeToVisualIndex(resolvedType);
+    const col = idx % GRID_COLS;
+    const row = 1;
+    const pos = cellToPosition3D(col, row);
+    attractor.x = pos.x;
+    attractor.y = pos.y;
+    attractor.z = pos.z;
+    attractor.strength = Math.max(attractor.strength, 0.9 + clamp01(velocity || 0.9) * 0.28);
+    attractor.col = col;
+    attractor.row = row;
+    const p = KEY_PROFILES[col % KEY_PROFILES.length];
+    currentKeyHue += (p.hue - currentKeyHue) * 0.42;
+    activeProfile = p;
+    targetKaleidoMix = Math.max(targetKaleidoMix, 0.62);
+    const vTag = String(drumVariant || '');
+    const variantBoost = /bright|click|bell|splash|tight/.test(vTag) ? 0.06 : (/deep|sub|dark|floor/.test(vTag) ? 0.03 : 0.0);
+    tgtGlitch = Math.max(tgtGlitch, (p.glitch || 0) * (0.88 + variantBoost));
+    tgtContrast = Math.max(tgtContrast, p.contrast || 2.2);
+    burstRingTime = now;
+    if (idx === 0 || String(resolvedType).toLowerCase() === 'kick') lastKickImpact = now;
+    else lastDrumMinorImpact = now;
+    pushRollImpulse(drumMidi != null ? drumMidi : (36 + idx), clamp01(velocity || 0.9), 'M');
+    pushRollDrumImpulse(idx, clamp01(velocity || 0.9), 'M');
   }
 
   function createSynthVoice(midiNote, opts) {
@@ -2273,10 +3002,8 @@ import { initMidiPlayer } from './midi-player.js';
     const polyHintInput = opts.polyHint != null
       ? opts.polyHint
       : (fromMIDI ? Math.max(1, displayedMidiNotes.length) : Math.max(1, keysPressed.size));
-    const nActive = Math.max(1, Math.min(24, polyHintInput));
-    // Keep one stable synth identity in MIDI playback: no architecture switches by poly.
-    const ecoMode = false;
-    const ultraEco = false;
+    const nActive = Math.max(1, Math.min(28, polyHintInput));
+    const effectivePoly = Math.max(1, Math.max(nActive, activeLeadVoices + 1));
     const harmonyMode = getHarmonyMode();
     const harmonyPolyLimit = fromMIDI ? 5 : 7;
     // Harmony is keyboard-only; MIDI should reproduce source notes cleanly and predictably.
@@ -2285,48 +3012,68 @@ import { initMidiPlayer } from './midi-player.js';
     const harmonyRatio = harmonyEnabled ? Math.pow(2, harmonySemitone / 12) : 1.0;
 
     const pitchNorm = clamp01((midi - 36) / 60);
-    const velStable = 0.62 + 0.38 * Math.pow(velNorm, 0.82);
-    const polyTrim = nActive > 1 ? 1 / (1 + Math.pow(nActive - 1, 1.08) * 0.16) : 1;
-    const sourceTrim = fromMIDI ? 0.96 : 1.0;
-    let peakGain = 0.31 * velStable * polyTrim * sourceTrim;
-    if (harmonyEnabled) peakGain *= 0.95;
-    peakGain = Math.max(0.07, Math.min(0.38, peakGain));
+    const polyForGain = fromMIDI ? Math.max(1, Math.min(16, nActive)) : effectivePoly;
+    const velStable = fromMIDI
+      ? (0.7 + 0.3 * Math.pow(velNorm, 0.92))
+      : (0.62 + 0.38 * Math.pow(velNorm, 0.88));
+    const polyTrim = fromMIDI
+      ? (1 / Math.pow(polyForGain, 0.34))
+      : (1 / Math.pow(effectivePoly, 0.58));
+    let peakGain = (fromMIDI ? 0.245 : 0.27) * velStable * polyTrim;
+    if (harmonyEnabled) peakGain *= 0.92;
+    peakGain = fromMIDI
+      ? Math.max(0.03, Math.min(0.16, peakGain))
+      : Math.max(0.038, Math.min(0.19, peakGain));
+    const heavyMidi = fromMIDI && effectivePoly >= 10;
+    const ultraMidi = fromMIDI && effectivePoly >= 14;
+    const useOscB = !heavyMidi;
+    const useAir = !ultraMidi;
+    const useSub = midi < 74 && (!fromMIDI || effectivePoly <= 11);
 
     const oscA = audioCtx.createOscillator();
-    oscA.type = freq > 1300 ? 'triangle' : 'sawtooth';
+    oscA.type = 'sawtooth';
     oscA.frequency.value = freq;
-    oscA.detune.value = -2.2;
+    oscA.detune.value = -2.8;
     const oscAGain = audioCtx.createGain();
-    oscAGain.gain.value = 0.66;
+    oscAGain.gain.value = 0.62;
     oscA.connect(oscAGain);
 
-    const oscB = ultraEco ? null : audioCtx.createOscillator();
-    const oscBGain = ultraEco ? null : audioCtx.createGain();
+    const oscB = useOscB ? audioCtx.createOscillator() : null;
+    const oscBGain = useOscB ? audioCtx.createGain() : null;
     if (oscB && oscBGain) {
-      oscB.type = ecoMode ? 'triangle' : 'sawtooth';
+      oscB.type = 'square';
       oscB.frequency.value = freq;
-      oscB.detune.value = 2.4;
-      oscBGain.gain.value = ecoMode ? 0.2 : 0.34;
+      oscB.detune.value = 4.5;
+      oscBGain.gain.value = 0.22;
       oscB.connect(oscBGain);
     }
 
-    const subOsc = ultraEco ? null : audioCtx.createOscillator();
-    const subGain = ultraEco ? null : audioCtx.createGain();
+    const airOsc = useAir ? audioCtx.createOscillator() : null;
+    const airGain = useAir ? audioCtx.createGain() : null;
+    if (airOsc && airGain) {
+      airOsc.type = 'sine';
+      airOsc.frequency.value = freq * 2;
+      airGain.gain.value = 0.045 + pitchNorm * 0.028;
+      airOsc.connect(airGain);
+    }
+
+    const subOsc = useSub ? audioCtx.createOscillator() : null;
+    const subGain = subOsc ? audioCtx.createGain() : null;
     if (subOsc && subGain) {
       subOsc.type = 'sine';
       subOsc.frequency.value = freq * 0.5;
-      subGain.gain.value = Math.max(0.02, 0.1 - pitchNorm * 0.04);
+      subGain.gain.value = Math.max(0.016, 0.07 - pitchNorm * 0.028);
       subOsc.connect(subGain);
     }
 
     const harmonyOsc = harmonyEnabled ? audioCtx.createOscillator() : null;
     const harmonyGain = harmonyEnabled ? audioCtx.createGain() : null;
     if (harmonyOsc && harmonyGain) {
-      harmonyOsc.type = ecoMode ? 'triangle' : 'sawtooth';
+      harmonyOsc.type = 'triangle';
       harmonyOsc.frequency.value = freq * harmonyRatio;
-      harmonyOsc.detune.value = harmonyMode === 'ninth' ? 0.6 : 1.2;
-      const harmonyBase = harmonyMode === 'ninth' ? 0.04 : 0.05;
-      harmonyGain.gain.value = harmonyBase / Math.sqrt(Math.max(1, nActive));
+      harmonyOsc.detune.value = harmonyMode === 'ninth' ? 0.4 : 0.9;
+      const harmonyBase = harmonyMode === 'ninth' ? 0.021 : 0.029;
+      harmonyGain.gain.value = harmonyBase / Math.sqrt(Math.max(1, effectivePoly));
       harmonyOsc.connect(harmonyGain);
     }
 
@@ -2334,29 +3081,42 @@ import { initMidiPlayer } from './midi-player.js';
     mixBus.gain.value = 1.0;
     oscAGain.connect(mixBus);
     if (oscBGain) oscBGain.connect(mixBus);
+    if (airGain) airGain.connect(mixBus);
     if (subGain) subGain.connect(mixBus);
     if (harmonyGain) harmonyGain.connect(mixBus);
 
     const voiceLowpass = audioCtx.createBiquadFilter();
     voiceLowpass.type = 'lowpass';
-    const brightness = clamp01(0.42 + velNorm * 0.34 + (1 - pitchNorm) * 0.18 - Math.min(0.16, (nActive - 1) * 0.02));
-    const lpStart = Math.min(9800, Math.max(1600, 1800 + brightness * 4200 + freq * 0.52));
-    const lpSustain = Math.min(6800, Math.max(1200, 1300 + brightness * 2400 + freq * 0.26));
+    const brightness = clamp01(0.44 + velNorm * 0.31 + (1 - pitchNorm) * 0.16 - Math.min(0.14, (effectivePoly - 1) * 0.012));
+    const lpStart = Math.min(9800, Math.max(1700, 1900 + brightness * 4600 + freq * 0.42));
+    const lpSustain = Math.min(7200, Math.max(1300, 1400 + brightness * 2900 + freq * 0.2));
     voiceLowpass.frequency.setValueAtTime(lpStart, now);
-    voiceLowpass.frequency.exponentialRampToValueAtTime(lpSustain, now + 0.09);
-    voiceLowpass.Q.value = 0.8 + brightness * 0.22;
+    voiceLowpass.frequency.exponentialRampToValueAtTime(lpSustain, now + 0.1);
+    voiceLowpass.Q.value = 0.72 + brightness * 0.18;
 
     const voiceHighpass = audioCtx.createBiquadFilter();
     voiceHighpass.type = 'highpass';
-    voiceHighpass.frequency.value = Math.max(24, Math.min(110, freq * 0.09));
-    voiceHighpass.Q.value = 0.72;
+    voiceHighpass.frequency.value = Math.max(22, Math.min(80, 18 + freq * 0.048));
+    voiceHighpass.Q.value = 0.64;
+
+    const voicePresence = audioCtx.createBiquadFilter();
+    voicePresence.type = 'peaking';
+    voicePresence.frequency.value = 2100 + pitchNorm * 900;
+    voicePresence.Q.value = 0.82;
+    voicePresence.gain.value = 0.62 + brightness * 0.55;
+
+    const voiceTame = audioCtx.createBiquadFilter();
+    voiceTame.type = 'peaking';
+    voiceTame.frequency.value = 4100;
+    voiceTame.Q.value = 1.1;
+    voiceTame.gain.value = -0.8;
 
     const voiceDrive = audioCtx.createWaveShaper();
     if (!leadDriveCurve) {
       leadDriveCurve = new Float32Array(512);
       for (let i = 0; i < leadDriveCurve.length; i++) {
         const x = (i / (leadDriveCurve.length - 1)) * 2 - 1;
-        leadDriveCurve[i] = Math.tanh(x * 1.5) * 0.98;
+        leadDriveCurve[i] = Math.tanh(x * 1.25) * 0.985;
       }
     }
     voiceDrive.curve = leadDriveCurve;
@@ -2367,22 +3127,24 @@ import { initMidiPlayer } from './midi-player.js';
 
     mixBus.connect(voiceLowpass);
     voiceLowpass.connect(voiceHighpass);
-    voiceHighpass.connect(voiceDrive);
+    voiceHighpass.connect(voicePresence);
+    voicePresence.connect(voiceTame);
+    voiceTame.connect(voiceDrive);
     voiceDrive.connect(envGain);
 
     let voiceOut = envGain;
     if (typeof audioCtx.createStereoPanner === 'function') {
       const voicePan = audioCtx.createStereoPanner();
-      voicePan.pan.value = Math.max(-0.22, Math.min(0.22, (midi - 66) / 34));
+      voicePan.pan.value = Math.max(-0.12, Math.min(0.12, (midi - 66) / 42));
       envGain.connect(voicePan);
       voiceOut = voicePan;
     }
     voiceOut.connect(masterGain);
 
-    const attack = shortOnly ? 0.0035 : (sustained ? 0.007 : 0.005);
-    const decay = shortOnly ? 0.07 : (sustained ? 0.11 : 0.085);
-    const sustainAmt = shortOnly ? 0.18 : (sustained ? 0.46 : 0.28);
-    const release = shortOnly ? 0.16 : (sustained ? 0.24 : 0.2);
+    const attack = shortOnly ? 0.004 : (sustained ? 0.008 : 0.0055);
+    const decay = shortOnly ? 0.1 : (sustained ? 0.19 : 0.14);
+    const sustainAmt = shortOnly ? 0.24 : (sustained ? 0.56 : 0.4);
+    const release = shortOnly ? 0.26 : (sustained ? 0.4 : 0.32);
     const releaseEnd = now + attack + decay + release;
     envGain.gain.setValueAtTime(0, now);
     envGain.gain.linearRampToValueAtTime(peakGain, now + attack);
@@ -2397,28 +3159,42 @@ import { initMidiPlayer } from './midi-player.js';
       envGain.gain.linearRampToValueAtTime(0, releaseEnd);
     }
 
-    const oscNodes = [oscA];
-    if (oscB) oscNodes.push(oscB);
+    activeLeadVoices += 1;
+    pushRollImpulse(midi, velNorm, fromMIDI ? 'M' : (keysPressed.size > 0 ? 'K' : 'A'));
+    const oscNodes = [oscA, oscB, airOsc];
     if (subOsc) oscNodes.push(subOsc);
     if (harmonyOsc) oscNodes.push(harmonyOsc);
-    for (let i = 0; i < oscNodes.length; i++) oscNodes[i].start(now);
+    for (let i = 0; i < oscNodes.length; i++) {
+      if (!oscNodes[i]) continue;
+      oscNodes[i].start(now);
+    }
 
     const scheduledStop = hasScheduledDuration
       ? now + Math.max(0.02, opts.duration) + release + 0.03
       : releaseEnd + 0.03;
     if (hasScheduledDuration || shortOnly) {
       for (let i = 0; i < oscNodes.length; i++) {
+        if (!oscNodes[i]) continue;
         try { oscNodes[i].stop(scheduledStop); } catch (_) {}
       }
     }
+
+    let released = false;
+    function releaseCounter() {
+      if (released) return;
+      released = true;
+      activeLeadVoices = Math.max(0, activeLeadVoices - 1);
+    }
+    oscA.onended = releaseCounter;
 
     function stop() {
       const t = audioCtx.currentTime;
       envGain.gain.cancelScheduledValues(t);
       envGain.gain.setValueAtTime(envGain.gain.value, t);
-      envGain.gain.setTargetAtTime(0, t, 0.012);
+      envGain.gain.setTargetAtTime(0, t, 0.022);
       for (let i = 0; i < oscNodes.length; i++) {
-        try { oscNodes[i].stop(t + 0.05); } catch (_) {}
+        if (!oscNodes[i]) continue;
+        try { oscNodes[i].stop(t + 0.11); } catch (_) {}
       }
     }
     return { stop };
@@ -2499,9 +3275,53 @@ import { initMidiPlayer } from './midi-player.js';
   initMidiPlayer({
     createSynthVoice,
     triggerVisualsForMidi,
+    triggerVisualsForMidiDrum: (drumMidi, drumType, velocity, drumVariant) => {
+      triggerVisualsForMidiDrum(drumMidi, drumType, velocity, drumVariant);
+    },
+    playDrumFromMidi: (drumType, meta) => {
+      initAudio();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      const m = meta || {};
+      const drumMidi = m.midiNote != null ? m.midiNote : 36;
+      const velocity = clamp01(m.velocity != null ? m.velocity : 0.88);
+      const mapped = drumType || gmDrumToType(drumMidi);
+      const drumVariant = m.drumVariant || gmDrumVariant(drumMidi);
+      playDrum(mapped, {
+        startTime: m.startTime != null ? m.startTime : (audioCtx ? audioCtx.currentTime + 0.0001 : undefined),
+        velocity,
+        fromMIDI: true,
+        midiNote: drumMidi,
+        variant: drumVariant
+      });
+    },
     initAudio,
     getAudioContext,
-    updateKeyDisplayFromMidi: (notes) => { displayedMidiNotes = notes && notes.length ? notes.slice() : []; }
+    updateKeyDisplayFromMidi: (notes) => { displayedMidiNotes = notes && notes.length ? notes.slice() : []; },
+    setMidiPlaybackState: (active) => {
+      midiPlaybackActive = !!active;
+      if (!midiPlaybackActive) midiPlaybackPolyphony = 0;
+    },
+    setMidiTransportInfo: (state) => {
+      if (!state) return;
+      if (typeof state.speed === 'number') midiPlaybackSpeed = Math.max(0.5, Math.min(2.0, state.speed));
+      if (typeof state.position === 'number') midiPlaybackPosition = Math.max(0, state.position);
+      if (typeof state.duration === 'number') midiPlaybackDuration = Math.max(0, state.duration);
+      if (typeof state.polyphony === 'number') midiPlaybackPolyphony = Math.max(0, state.polyphony);
+      if (Array.isArray(state.preview)) {
+        midiRollPreview = state.preview.slice(0, ROLL3D_MAX_INSTANCES).map((n) => ({
+          midi: Math.max(0, Math.min(127, Math.round(n.midi || 0))),
+          velocity: clamp01(typeof n.velocity === 'number' ? n.velocity : 0.8),
+          trackIndex: n.trackIndex | 0,
+          ahead: typeof n.ahead === 'number' ? n.ahead : 0,
+          duration: typeof n.duration === 'number' ? n.duration : 0.12,
+          time: typeof n.time === 'number' ? n.time : 0,
+          isDrum: !!n.isDrum,
+          drumType: n.drumType || '',
+          drumClass: n.drumClass != null ? Math.max(0, Math.min(11, n.drumClass | 0)) : null,
+          drumVariant: n.drumVariant || ''
+        }));
+      }
+    }
   });
 
   // Mode HUD: intentional, legible, minimal
@@ -2509,12 +3329,13 @@ import { initMidiPlayer } from './midi-player.js';
   function createHud() {
     hudEl = document.createElement('div');
     hudEl.setAttribute('aria-live', 'polite');
-    hudEl.style.cssText = 'position:fixed;bottom:12px;left:12px;z-index:1000;pointer-events:none;font:11px/1.5 "JetBrains Mono","IBM Plex Mono","SFMono-Regular","Menlo","Consolas",monospace;color:rgba(214,238,255,0.62);letter-spacing:0.04em;background:rgba(2,8,14,0.26);padding:6px 10px;border-radius:0;backdrop-filter:blur(6px)';
+    hudEl.className = 'hud-top-menu';
     document.body.appendChild(hudEl);
   }
   function updateHud() {
     if (!hudEl) createHud();
     const modes = [];
+    const hueDeg = (Math.round((currentKeyHue % 1) * 360) + 360) % 360;
     modes.push('[1] mic ' + (micEnabled ? 'ON' : 'off'));
     modes.push('[2] arp ' + (arpEnabled ? 'ON' : 'off'));
     modes.push('[3] cam ' + (gyroEnabled ? 'ON' : 'off'));
@@ -2528,8 +3349,21 @@ import { initMidiPlayer } from './midi-player.js';
     modes.push('vol ' + (masterVolume * 100 | 0) + '%');
     if (audioEnergy > 0.01) modes.push('audio ' + (audioEnergy * 100 | 0) + '%');
     if (micLevel > 0.01) modes.push('mic ' + (micLevel * 100 | 0) + '%');
+    modes.push(`eq ${bassLevel * 100 | 0}/${midLevel * 100 | 0}/${trebleLevel * 100 | 0}`);
+    modes.push(`fx w${curWarp * 100 | 0} g${curGlitch * 100 | 0} p${curPrism * 100 | 0}`);
+    modes.push(`style m${styleMuseum * 100 | 0} l${styleLsd * 100 | 0}`);
+    modes.push(`hue ${hueDeg}°`);
+    modes.push(`zoom ${zoomLevel.toFixed(2)}x`);
+    if (mixAutoGain) modes.push(`mix ${(mixAutoGain.gain.value * 100 | 0)}%`);
+    if (headTrackingActive) modes.push(`head ${headZone.toLowerCase()}`);
     if (chordCount > 1) modes.push('chord ×' + chordCount);
-    hudEl.innerHTML = modes.join(' &nbsp;·&nbsp; ');
+    if (activeLeadVoices > 0) modes.push('voices ' + activeLeadVoices);
+    if (midiPlaybackActive || midiPlaybackDuration > 0.01) {
+      modes.push(`midi ${midiPlaybackSpeed.toFixed(2)}x ${midiPlaybackPosition.toFixed(1)}/${midiPlaybackDuration.toFixed(1)}s`);
+      if (midiPlaybackPolyphony > 0) modes.push('m-poly ' + midiPlaybackPolyphony);
+    }
+    const menuLead = '<span style="opacity:.94">FILE</span>&nbsp;&nbsp;<span style="opacity:.94">EDIT</span>&nbsp;&nbsp;<span style="opacity:.94">VIEW</span>&nbsp;&nbsp;<span style="opacity:.94">SYNTH</span>&nbsp;&nbsp;<span style="opacity:.94">FX</span>&nbsp;&nbsp;<span style="opacity:.94">MIDI</span>&nbsp;&nbsp;<span style="opacity:.94">TOOLS</span>';
+    hudEl.innerHTML = `${menuLead}&nbsp;&nbsp;<span style="opacity:.45">|</span>&nbsp;&nbsp;${modes.join(' &nbsp;<span style="opacity:.45">·</span>&nbsp; ')}`;
   }
 
   function createHelpOverlay() {
@@ -2542,7 +3376,7 @@ import { initMidiPlayer } from './midi-player.js';
       <div style="max-width:360px;font:11px/1.6 'SF Pro Text',system-ui,sans-serif;color:rgba(255,255,255,0.9);letter-spacing:0.03em;">
         <div style="font-weight:600;margin-bottom:12px;font-size:13px;">Sound Matrix · 快捷键</div>
         <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 20px;">
-          <span style="color:rgba(255,255,255,0.5)">A–L ; '</span><span>鼓组</span>
+          <span style="color:rgba(255,255,255,0.5)">A–L ; ' \\</span><span>鼓组</span>
           <span style="color:rgba(255,255,255,0.5)">Z–M</span><span>低八度合成器</span>
           <span style="color:rgba(255,255,255,0.5)">Q–P [ ]</span><span>中/高八度</span>
           <span style="color:rgba(255,255,255,0.5)">Shift + 键</span><span>高八度</span>
@@ -2554,6 +3388,8 @@ import { initMidiPlayer } from './midi-player.js';
 	          <span style="color:rgba(255,255,255,0.5)">8</span><span>模拟屏（clean / crt / vhs）</span>
 	          <span style="color:rgba(255,255,255,0.5)">9</span><span>文字引擎（clean / glitch / overclock）</span>
 	          <span style="color:rgba(255,255,255,0.5)">− =</span><span>主音量减 / 加</span>
+          <span style="color:rgba(255,255,255,0.5)">Alt + ↑/↓/0</span><span>MIDI 速度 + / - / 重置</span>
+          <span style="color:rgba(255,255,255,0.5)">Alt + T</span><span>Tap Tempo</span>
           <span style="color:rgba(255,255,255,0.5)">Esc</span><span>停止延音 + 重置缩放</span>
           <span style="color:rgba(255,255,255,0.5)">?</span><span>本帮助</span>
           <span style="color:rgba(255,255,255,0.5)">滚轮</span><span>缩放</span>
@@ -2716,17 +3552,15 @@ import { initMidiPlayer } from './midi-player.js';
     if (key === 'Digit3') { initGyro(); return; }
     if (key === 'Digit4') { ambientMode ? stopAmbient() : startAmbient(); return; }
 
-    // Drum row: A–L, ;, '
+    // Drum row: A–L, ;, ', \
     const drumType = DRUM_KEYS[key];
     if (drumType != null) {
       e.preventDefault();
       markUserAction();
       initAudio();
-      initGPGPU();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
       const drumIndex = DRUM_KEY_ORDER.indexOf(key);
-      const col = drumIndex >= 0 ? drumIndex % GRID_COLS : 0;
-      const drumMidi = cellToMidi(col, 1);
-      playNote(drumMidi, false, 0.76);
+      playDrum(drumType, { velocity: 1.0, startTime: audioCtx ? audioCtx.currentTime + 0.0001 : undefined, fromMIDI: false });
       triggerVisualsForDrum(drumIndex >= 0 ? drumIndex : 0);
       return;
     }
@@ -2810,136 +3644,9 @@ import { initMidiPlayer } from './midi-player.js';
   }
 
   function updateKeyDisplay() {
-    if (!keyDisplayCanvas || !keyDisplayTexture || !keyDisplayMesh) return;
-    const hasKeys = keysPressed.size > 0;
-    const hasMidi = displayedMidiNotes.length > 0;
-    const targetReveal = (hasKeys || hasMidi) ? 1 : 0;
-    keyDisplayReveal = smoothApproach(keyDisplayReveal, targetReveal, 0.66, 0.52);
-    const visible = keyDisplayReveal > 0.02;
-    keyDisplayMesh.visible = visible;
-    if (visible) {
-      const s = 0.97 + 0.03 * keyDisplayReveal;
-      keyDisplayMesh.scale.set(s, s, 1);
-      if (keyDisplayMesh.material) keyDisplayMesh.material.opacity = 0.74 + 0.14 * keyDisplayReveal;
-    }
-    const ctx = keyDisplayCanvas.getContext('2d');
-    if (!ctx) return;
-    const w = keyDisplayCanvas.width;
-    const h = keyDisplayCanvas.height;
-    ctx.clearRect(0, 0, w, h);
-    if (!hasKeys && !hasMidi) {
-      keyDisplayTexture.needsUpdate = true;
-      return;
-    }
-    const hueDeg = Math.round(currentKeyHue * 360) % 360;
-    const now = performance.now() * 0.001;
-    const rhythmA = 0.5 + 0.5 * Math.sin(now * 0.45);
-    const rhythmB = 0.5 + 0.5 * Math.sin(now * 0.38 + 1.0);
-    const codeFont = `"JetBrains Mono","IBM Plex Mono","Fira Code","SFMono-Regular","Menlo","Consolas",monospace`;
-    const txtFx = TEXT_GLITCH_VALUES[textModeIdx];
-    ctx.imageSmoothingEnabled = false;
-    const pairs = [];
-    if (hasKeys) {
-      keysPressed.forEach(k => {
-        const midi = KEY_TO_NOTE[k];
-        if (midi != null) pairs.push({ key: k, midi });
-      });
-      pairs.sort((a, b) => a.midi - b.midi);
-    }
-    const keyLabels = pairs.map(p => KEY_TO_LABEL[p.key] || p.key.replace('Key', ''));
-    const keyNotes = pairs.map(p => midiToNoteName(p.midi));
-    const sortedMidi = hasMidi ? [...displayedMidiNotes].sort((a, b) => a - b) : [];
-    const midiLabels = sortedMidi.map(m => midiToNoteName(m));
-    const ordered = collectOrderedActiveNotes();
-    const letters = keyLabels.join('   ');
-    const keyText = keyNotes.join(' · ');
-    const midiText = midiLabels.join(' · ');
-
-    const mergedText = ordered.map(n => midiToNoteName(n.midi)).join(' · ');
-    const mergedDetail = ordered.map(n => `${n.src}:${midiToNoteName(n.midi)}`).join('   ');
-    const summaryText = mergedText || (hasKeys ? keyText : midiText);
-    const detailText = mergedDetail || (hasKeys && hasMidi && midiText && midiText !== keyText ? ('MIDI  ' + midiText) : '');
-    const denseText = hasKeys && hasMidi
-      ? (`KEY ${keyLabels.join(' | ')}   +   MIDI ${midiLabels.join(' | ')}`)
-      : (hasKeys ? keyLabels.join(' | ') : midiLabels.join(' | '));
-    const sourceText = hasKeys && hasMidi ? `<KEYBOARD + MIDI ${letters}>` : (hasKeys ? (`<KEY ${letters}>`) : '<MIDI STREAM>');
-    const streamSeed = [sourceText, detailText, summaryText].filter(Boolean).join(' // ');
-
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'left';
-    const streamText = (`${streamSeed} // `).repeat(8 + textModeIdx * 4);
-    const streamSpan = Math.max(420, w * 0.8);
-    const scrollA = (now * (126 + textModeIdx * 34)) % streamSpan;
-    const scrollB = (now * (88 + textModeIdx * 22)) % streamSpan;
-    ctx.font = `640 ${12 + textModeIdx * 2}px ${codeFont}`;
-    ctx.fillStyle = `hsla(${hueDeg}, 30%, 84%, ${0.44 + 0.18 * keyDisplayReveal})`;
-    ctx.fillText(streamText, -scrollA, h * 0.2);
-    ctx.fillText(streamText, -scrollA + streamSpan, h * 0.2);
-    ctx.fillStyle = `hsla(${hueDeg}, 26%, 78%, ${0.32 + 0.16 * keyDisplayReveal})`;
-    ctx.fillText(streamText, -streamSpan + scrollB, h * 0.27);
-    ctx.fillText(streamText, scrollB, h * 0.27);
-
-    ctx.textAlign = 'center';
-    const summaryCount = Math.max(1, (summaryText ? summaryText.split('·').length : 1));
-    const summarySize = Math.min(62 + textModeIdx * 4, 30 + Math.floor(240 / summaryCount) + textModeIdx * 2);
-    const sourceSize = Math.max(15 + textModeIdx, Math.min(24 + textModeIdx, summarySize - 8));
-    const denseSize = Math.max(11, sourceSize - 1);
-
-    if (sourceText) {
-      ctx.font = `650 ${sourceSize}px ${codeFont}`;
-      ctx.fillStyle = `hsla(${hueDeg}, 30%, 88%, ${0.62 + 0.12 * keyDisplayReveal + rhythmA * 0.05})`;
-      ctx.fillText(sourceText, w / 2, h * 0.41);
-    }
-
-    if (denseText) {
-      ctx.font = `610 ${denseSize}px ${codeFont}`;
-      ctx.fillStyle = `hsla(${hueDeg}, 24%, 82%, ${0.52 + 0.1 * keyDisplayReveal + rhythmB * 0.04})`;
-      ctx.fillText(denseText, w / 2, h * 0.5);
-    }
-
-    if (summaryText) {
-      const glitchJit = Math.sin(now * (16.0 + textModeIdx * 6.0) + summaryCount * 0.7) * (0.9 + 1.5 * txtFx);
-      ctx.font = `760 ${summarySize}px ${codeFont}`;
-      const offA = 1.2 + txtFx * 1.8;
-      const offB = 1.2 + txtFx * 1.6;
-      ctx.fillStyle = `hsla(${(hueDeg + 352) % 360}, 86%, 68%, ${0.16 + 0.12 * keyDisplayReveal})`;
-      ctx.fillText(summaryText, w / 2 + offA + glitchJit, h * 0.64);
-      ctx.fillStyle = `hsla(${(hueDeg + 18) % 360}, 86%, 72%, ${0.18 + 0.12 * keyDisplayReveal})`;
-      ctx.fillText(summaryText, w / 2 - offB - glitchJit, h * 0.64);
-      ctx.fillStyle = `hsla(${hueDeg}, 44%, 96%, ${0.9 + 0.08 * keyDisplayReveal})`;
-      ctx.shadowBlur = 22 + 14 * keyDisplayReveal + txtFx * 4;
-      ctx.shadowColor = `hsla(${hueDeg}, 72%, 68%, ${0.24 + 0.18 * keyDisplayReveal + txtFx * 0.04})`;
-      ctx.fillText(summaryText, w / 2, h * 0.64);
-      if (textModeIdx > 0) {
-        const strips = 2 + textModeIdx * 2;
-        for (let i = 0; i < strips; i++) {
-          const y = h * 0.56 + ((i + 1) / (strips + 2)) * h * 0.16;
-          const bandH = 2 + ((i + textModeIdx) % 3);
-          const xShift = ((i % 2 === 0 ? 1 : -1) * (1.8 + txtFx * 2.6)) + Math.sin(now * (22 + i * 3.5)) * 1.2;
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(0, y, w, bandH);
-          ctx.clip();
-          ctx.fillStyle = `hsla(${(hueDeg + 8) % 360}, 38%, 94%, ${0.3 + 0.15 * keyDisplayReveal})`;
-          ctx.fillText(summaryText, w / 2 + xShift, h * 0.64);
-          ctx.restore();
-        }
-      }
-    }
-    if (detailText) {
-      ctx.font = `580 ${Math.max(11, sourceSize - 1)}px ${codeFont}`;
-      ctx.fillStyle = `hsla(${hueDeg}, 22%, 82%, ${0.5 + 0.12 * keyDisplayReveal + rhythmB * 0.05})`;
-      ctx.fillText(detailText, w / 2, h * 0.79);
-    }
-
-    const tags = [];
-    if (hasKeys) tags.push('KEYBOARD');
-    if (hasMidi) tags.push('MIDI');
-    ctx.font = `700 11px ${codeFont}`;
-    ctx.fillStyle = `hsla(${hueDeg}, 24%, 80%, ${0.4 + 0.12 * keyDisplayReveal + rhythmA * 0.06})`;
-    ctx.fillText(tags.join('   •   '), w / 2, 16);
-    ctx.shadowBlur = 0;
-    keyDisplayTexture.needsUpdate = true;
+    if (!keyDisplayMesh) return;
+    keyDisplayReveal += (0 - keyDisplayReveal) * 0.24;
+    keyDisplayMesh.visible = false;
   }
 
   function ensureNoteRepeatOverlay() {
@@ -2947,10 +3654,17 @@ import { initMidiPlayer } from './midi-player.js';
     if (!noteRepeatStyleEl) {
       noteRepeatStyleEl = document.createElement('style');
       noteRepeatStyleEl.textContent = `
+        .note-row-edge {
+          position: absolute;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px 12px;
+          pointer-events: none;
+        }
         .note-row-terminal {
           position: absolute;
           overflow: hidden;
-          padding-top: 9px;
+          padding-top: 11px;
         }
         .note-row-terminal::before {
           content: attr(data-stream);
@@ -2960,21 +3674,21 @@ import { initMidiPlayer } from './midi-player.js';
           top: -2px;
           white-space: nowrap;
           overflow: hidden;
-          font: 760 11px/1 "SFMono-Regular","Menlo","Consolas",monospace;
-          letter-spacing: 0.1em;
-          color: rgba(188, 234, 255, 0.5);
-          text-shadow: 0 0 10px rgba(98, 180, 255, 0.26);
+          font: 760 12px/1 "Lucida Console","Courier New","Tahoma","MS Sans Serif",monospace;
+          letter-spacing: 0.12em;
+          color: rgba(188, 234, 255, 0.54);
+          text-shadow: 0 0 10px rgba(98, 180, 255, 0.24);
           animation: terminalFlow var(--terminal-speed, 5.8s) linear infinite;
           pointer-events: none;
         }
         .note-head-code {
           display: inline-flex;
           align-items: center;
-          gap: 6px;
+          gap: 7px;
           padding: 0;
           border-radius: 0;
-          font: 860 22px/1.04 "SFMono-Regular","Menlo","Consolas",monospace;
-          letter-spacing: 0.03em;
+          font: 860 34px/1.02 "Lucida Console","Courier New","Tahoma","MS Sans Serif",monospace;
+          letter-spacing: 0.04em;
           background: transparent;
           position: relative;
           overflow: visible;
@@ -2983,12 +3697,12 @@ import { initMidiPlayer } from './midi-player.js';
         }
         .note-head-code .glyph-src {
           color: rgba(146, 215, 255, 0.66);
-          font: 760 11px/1 "SFMono-Regular","Menlo","Consolas",monospace;
+          font: 760 13px/1 "Lucida Console","Courier New","Tahoma","MS Sans Serif",monospace;
           letter-spacing: 0.06em;
         }
         .note-head-code .glyph-code {
           color: rgba(178,218,255,0.6);
-          font: 680 11px/1 "SFMono-Regular","Menlo","Consolas",monospace;
+          font: 680 12px/1 "Lucida Console","Courier New","Tahoma","MS Sans Serif",monospace;
           letter-spacing: 0.07em;
           text-transform: uppercase;
         }
@@ -3007,7 +3721,7 @@ import { initMidiPlayer } from './midi-player.js';
           grid-area: 1 / 1;
           position: relative;
           color: rgba(236,244,255,0.95);
-          text-shadow: 0 0 12px rgba(128,190,255,0.36);
+          text-shadow: 0 0 15px rgba(128,190,255,0.42);
         }
         .note-head-code .glyph-ca-r {
           position: absolute;
@@ -3027,10 +3741,19 @@ import { initMidiPlayer } from './midi-player.js';
         }
         .note-head-code .glyph-caret {
           color: rgba(220, 245, 255, 0.9);
-          font: 700 13px/1 "SFMono-Regular","Menlo","Consolas",monospace;
+          font: 700 13px/1 "Lucida Console","Courier New","Tahoma","MS Sans Serif",monospace;
           letter-spacing: 0;
           animation: caretBlink 1s steps(2,end) infinite;
           text-shadow: 0 0 8px rgba(160, 225, 255, 0.45);
+        }
+        .note-row-side {
+          align-items: flex-start;
+          justify-content: flex-start;
+          gap: 6px 10px;
+        }
+        .note-row-side.right {
+          justify-content: flex-end;
+          text-align: right;
         }
         @keyframes noteCodeJitter {
           0% { transform: translate(0px, 0px); }
@@ -3067,22 +3790,27 @@ import { initMidiPlayer } from './midi-player.js';
       'transition:opacity 120ms ease-out'
     ].join(';');
     const rows = [
-      { top: '9.5%', alpha: 0.98, blur: 0 },
-      { top: '49%', alpha: 0.7, blur: 0.2 },
-      { top: '84%', alpha: 0.56, blur: 0.35 }
+      { top: '6.2%', left: '3%', right: '3%', alpha: 0.98, blur: 0, kind: 'top' },
+      { top: '30%', left: '70%', right: '2.5%', alpha: 0.72, blur: 0.22, kind: 'right' },
+      { top: '67%', left: '2.5%', right: '70%', alpha: 0.68, blur: 0.18, kind: 'left' },
+      { top: '90.2%', left: '4%', right: '4%', alpha: 0.56, blur: 0.32, kind: 'bottom' }
     ];
     rows.forEach((cfg, idx) => {
       const row = document.createElement('div');
+      row.classList.add('note-row-edge');
+      row.dataset.kind = cfg.kind;
       if (idx === 0) row.classList.add('note-row-terminal');
+      if (cfg.kind === 'left' || cfg.kind === 'right') row.classList.add('note-row-side');
+      if (cfg.kind === 'right') row.classList.add('right');
       row.style.cssText = [
         'position:absolute',
         `top:${cfg.top}`,
-        'left:4%',
-        'right:4%',
+        `left:${cfg.left}`,
+        `right:${cfg.right}`,
         'display:flex',
         'flex-wrap:wrap',
-        'gap:8px 10px',
-        'justify-content:flex-start',
+        'gap:8px 12px',
+        `justify-content:${cfg.kind === 'right' ? 'flex-end' : 'flex-start'}`,
         `opacity:${cfg.alpha}`,
         `filter:blur(${cfg.blur}px)`
       ].join(';');
@@ -3160,20 +3888,38 @@ import { initMidiPlayer } from './midi-player.js';
         display:inline-block;
         padding:0;
         border-radius:0;
-        font:780 19px/1.06 'JetBrains Mono','IBM Plex Mono','SFMono-Regular','Menlo','Consolas',monospace;
+        font:780 24px/1.04 'Lucida Console','Courier New','Tahoma','MS Sans Serif','Consolas',monospace;
         letter-spacing:0.05em;
         color:hsla(${hueDeg},36%,96%,${a});
         background:transparent;
         text-shadow:0 0 8px hsla(${hueDeg},52%,70%,0.28);
       ">${srcTag}${txt}</span>`;
     }).join('');
+    const htmlCompact = notes.map((n, i) => {
+      const txt = midiToNoteName(n.midi);
+      const srcTag = n.src === 'M' ? 'M' : 'K';
+      const a = i % 2 === 0 ? 0.86 : 0.72;
+      return `<span style="
+        display:inline-block;
+        padding:0;
+        font:760 20px/1.02 'Lucida Console','Courier New','Tahoma','MS Sans Serif','Consolas',monospace;
+        letter-spacing:0.06em;
+        color:hsla(${hueDeg},36%,95%,${a});
+        text-shadow:0 0 7px hsla(${hueDeg},52%,68%,0.22);
+      ">${srcTag}.${txt}</span>`;
+    }).join('');
     noteRepeatRowEls.forEach((row, idx) => {
-      row.innerHTML = idx === 0 ? htmlHead : html;
-      if (idx === 0) {
+      const kind = row.dataset.kind || '';
+      row.innerHTML = kind === 'top'
+        ? htmlHead
+        : (kind === 'right' ? htmlCompact : html);
+      if (kind === 'top') {
         row.setAttribute('data-stream', terminalStream);
         row.style.setProperty('--terminal-speed', `${Math.max(2.6, 5.8 - textModeIdx * 1.1)}s`);
       }
-      row.style.transform = idx === 0 ? 'translateX(0%)' : (idx === 1 ? 'translateX(6%)' : 'translateX(-4%)');
+      if (kind === 'right') row.style.transform = 'translateX(3%)';
+      else if (kind === 'left') row.style.transform = 'translateX(-2%)';
+      else row.style.transform = 'translateX(0%)';
     });
   }
 
@@ -3199,6 +3945,7 @@ import { initMidiPlayer } from './midi-player.js';
     if (outputBusGain) outputBusGain.connect(analyser);
     else if (limiter) limiter.connect(analyser);
     else if (compressor) compressor.connect(analyser);
+    if (drumDryBus) drumDryBus.connect(analyser);
   }
 
   function updateAudioLevels() {
@@ -3219,15 +3966,15 @@ import { initMidiPlayer } from './midi-player.js';
 
   function updateMixAutoGain() {
     if (!mixAutoGain) return;
-    const midiActive = displayedMidiNotes && displayedMidiNotes.length > 0;
+    const midiActive = midiPlaybackActive || (displayedMidiNotes && displayedMidiNotes.length > 0);
     if (midiActive) {
       // MIDI playback: fixed gain target to avoid audible pumping.
-      const targetMidi = 0.92;
-      mixAutoGain.gain.value += (targetMidi - mixAutoGain.gain.value) * 0.08;
+      const targetMidi = 1.0;
+      mixAutoGain.gain.value += (targetMidi - mixAutoGain.gain.value) * 0.06;
       return;
     }
     const polyKeyboard = keysPressed.size + sustainedVoices.size * 0.35;
-    const polyMidi = displayedMidiNotes.length;
+    const polyMidi = Math.max(displayedMidiNotes.length, midiPlaybackPolyphony * 0.85);
     const poly = Math.max(polyKeyboard, polyMidi, chordCount);
     const polyComp = poly > 1 ? 1 / (1 + Math.pow(poly - 1, 1.1) * 0.16) : 1;
     const energyComp = 1 - Math.min(0.16, audioEnergy * 0.11 + bassLevel * 0.06 + midLevel * 0.03);
@@ -3538,6 +4285,9 @@ import { initMidiPlayer } from './midi-player.js';
     }
 
     const dblFlash = Math.max(0, 1 - (now - lastDoubleTap) / 0.4);
+    const kickFlash = Math.pow(Math.max(0, 1 - (now - lastKickImpact) / 0.16), 0.24);
+    const minorDrumFlash = Math.pow(Math.max(0, 1 - (now - lastDrumMinorImpact) / 0.1), 0.64) * 0.2;
+    const impactFlash = clamp01(kickFlash + minorDrumFlash);
     // Mic: smoothed + gated, scaled for intuitive visual range (not overwhelming)
     const micVisual = micVisualCurve(micLevelSmoothed);
     const audioBoost = audioEnergy * 0.6 + micVisual * 0.9;
@@ -3727,7 +4477,7 @@ import { initMidiPlayer } from './midi-player.js';
       const posAttr = tunnelParticles.geometry.attributes.position;
       const arr = posAttr.array;
       const base = tunnelParticles.userData.basePos;
-      const m = 0.45 + tunnelW * 1.95;
+      const m = 0.32 + tunnelW * 1.18;
       for (let i = 0; i < arr.length; i += 3) {
         const j = i / 3;
         const bx = base[i], by = base[i+1], bz = base[i+2];
@@ -3859,18 +4609,18 @@ import { initMidiPlayer } from './midi-player.js';
         arr[i+2] = base[i+2] + 0.25 * m * Math.sin(now * 1.5 + base[i+2] * 2);
         // Perpendicular wave (ribbon) for style 1/2; pulse bands for style 3
         if (speedW > 0.02) {
-          const scatter = 0.04 * Math.sin(now * 3 + i * 0.2) * (1 - t);
+          const scatter = 0.018 * Math.sin(now * 2.4 + i * 0.16) * (1 - t);
           arr[i] += scatter;
           arr[i+1] += scatter * 0.6;
           if (speedMotion === 1) {
-            arr[i+1] += speedW * 0.04 * m * Math.sin(t * 12 + now * 2);
-            arr[i+2] += speedW * 0.03 * m * Math.cos(t * 10 + now * 1.5);
+            arr[i+1] += speedW * 0.022 * m * Math.sin(t * 10 + now * 1.8);
+            arr[i+2] += speedW * 0.018 * m * Math.cos(t * 9 + now * 1.3);
           } else if (speedMotion === 2) {
-            arr[i] += speedW * 0.03 * m * Math.sin(t * 15 + now * 2.5) * (1 - t);
-            arr[i+2] += speedW * 0.03 * m * Math.cos(t * 12 + now * 2) * (1 - t);
+            arr[i] += speedW * 0.018 * m * Math.sin(t * 13 + now * 2.1) * (1 - t);
+            arr[i+2] += speedW * 0.018 * m * Math.cos(t * 10 + now * 1.7) * (1 - t);
           } else if (speedMotion === 3) {
             const band = Math.floor(t * 6) * 0.6 + now * 1.2;
-            arr[i+1] += speedW * 0.025 * m * Math.sin(band) * (1 - t);
+            arr[i+1] += speedW * 0.016 * m * Math.sin(band) * (1 - t);
           }
         }
       }
@@ -3889,13 +4639,13 @@ import { initMidiPlayer } from './midi-player.js';
         const isActive = c === activeCol && isKeyActive;
         const baseX = ((c + 0.5) / SPECTRUM_BAR_COUNT) * 2.8 - 1.4;
         const lean = isActive ? 0.18 * Math.sin(colPhase * 2 + c) : 0;
-        const explode = isActive ? 0.1 : 0;
+        const explode = isActive ? 0.04 : 0;
         for (let v = 0; v < VERT_COL_POINTS; v++) {
           const i = c * VERT_COL_POINTS + v;
           const t = v / (VERT_COL_POINTS - 1);
           const baseY = t * 1.6 - 0.8;
           const phase = c * 0.65 + v * 0.04 + colPhase * 1.5;
-          const waveAmp = isActive ? 0.6 + 0.25 * Math.sin(colPhase + c) : 0.12;
+          const waveAmp = isActive ? 0.32 + 0.12 * Math.sin(colPhase + c) : 0.08;
           const scatter = explode * Math.sin(v * 3.3 + colPhase * 3) * (0.5 + 0.5 * Math.sin(v * 0.7));
           arr[i*3]   = baseX + lean * t + 0.035 * Math.sin(colPhase + c + v * 0.04) + scatter;
           arr[i*3+1] = baseY + waveAmp * Math.sin(phase) + 0.12 * Math.sin(colPhase * 1.2 + v * 0.08 + c * 0.9);
@@ -3945,24 +4695,24 @@ import { initMidiPlayer } from './midi-player.js';
           const radius = branchT * 0.6 * sc;
           const jitter = 0.018 * Math.sin(i * 5.0 + now * 2.0);
           if (plasmaMotion === 0) {
-            const arc = 0.22 * radius * Math.sin(branchT * 6.0 + now * 1.2 + branch * 0.35);
+              const arc = 0.14 * radius * Math.sin(branchT * 5.2 + now * 1.1 + branch * 0.3);
             arr[i*3]   = attractor.x + Math.cos(branchAngle) * radius + arc + jitter;
-            arr[i*3+1] = attractor.y + branchT * 0.24 * Math.sin(now * 1.0 + branch) + off[i*3+1] * 0.25;
+              arr[i*3+1] = attractor.y + branchT * 0.18 * Math.sin(now * 0.9 + branch) + off[i*3+1] * 0.18;
             arr[i*3+2] = attractor.z + Math.sin(branchAngle) * radius - arc * 0.7 + jitter * 0.6;
           } else if (plasmaMotion === 1) {
             arr[i*3]   = attractor.x + Math.cos(branchAngle) * radius + jitter * 0.5;
-            arr[i*3+1] = attractor.y + branchT * 0.22 + off[i*3+1] * 0.15;
+              arr[i*3+1] = attractor.y + branchT * 0.16 + off[i*3+1] * 0.12;
             arr[i*3+2] = attractor.z + Math.sin(branchAngle) * radius + jitter * 0.5;
           } else if (plasmaMotion === 2) {
             const liss = now * 1.0 + branch * 0.4;
             const lx = Math.sin(liss) * radius * 0.7;
             const lz = Math.sin(liss * 2 + 0.6) * radius * 0.5;
             arr[i*3]   = attractor.x + lx + Math.cos(branchAngle) * branchT * 0.15;
-            arr[i*3+1] = attractor.y + branchT * 0.18 * Math.sin(now * 0.8 + branch);
+              arr[i*3+1] = attractor.y + branchT * 0.14 * Math.sin(now * 0.7 + branch);
             arr[i*3+2] = attractor.z + lz + Math.sin(branchAngle) * branchT * 0.15;
           } else {
             const drift = 0.05 * Math.sin(now * 0.6 + branch * 1.2) * branchT;
-            const wobble = 0.16 * radius * Math.sin(now * 0.7 + branch * 1.1 + branchT * 8.0);
+              const wobble = 0.1 * radius * Math.sin(now * 0.65 + branch * 1.1 + branchT * 7.0);
             arr[i*3]   = attractor.x + Math.cos(branchAngle) * radius * 0.72 + drift + wobble + off[i*3] * 0.15;
             arr[i*3+1] = attractor.y + branchT * 0.18 + 0.03 * Math.sin(now * 0.9 + branch * 1.5);
             arr[i*3+2] = attractor.z + Math.sin(branchAngle) * radius * 0.72 + drift * 0.6 - wobble * 0.7 + off[i*3+2] * 0.15;
@@ -4017,6 +4767,8 @@ import { initMidiPlayer } from './midi-player.js';
       floatPts.material.color.setHSL(currentKeyHue + 0.28, 0.52, 0.88);
     }
 
+    updateRoll3DLayer(now, syncA, syncB, impactFlash, currentKeyHue);
+
     if (Math.floor(now * 6) % 1 === 0) updateHud();
     updateKeyDisplay();
     updateNoteRepeatOverlay();
@@ -4028,6 +4780,17 @@ import { initMidiPlayer } from './midi-player.js';
     if (headTrackingActive) updateGestureBar();
 
     try {
+      const renderRollOverlay = () => {
+        if (!rollOverlayScene || !rollOverlayCamera || !roll3DGroup) return;
+        rollOverlayCamera.position.x = 0.0;
+        rollOverlayCamera.position.y = 0.0 + 0.008 * Math.sin(now * 0.2 + 0.5);
+        rollOverlayCamera.position.z = 4.35 + 0.05 * Math.sin(now * 0.13 + 0.9);
+        rollOverlayCamera.lookAt(0, -0.12, -1.9);
+        renderer.autoClear = false;
+        renderer.clearDepth();
+        renderer.render(rollOverlayScene, rollOverlayCamera);
+        renderer.autoClear = true;
+      };
       if (postQuad && rtScene) {
         const pu = postQuad.material.uniforms;
         pu.tDiffuse.value = rtScene.texture;
@@ -4035,27 +4798,28 @@ import { initMidiPlayer } from './midi-player.js';
         pu.kaleidoFolds.value = currentKaleidoFolds;
         pu.kaleidoRotation.value = kaleidoRotation;
         pu.kaleidoMix.value = kaleidoMix;
-        pu.chromaticOffset.value = Math.min(0.018, activeProfile.ca + touchIntensity * 0.0011 + dblFlash * 0.0018 + bassHit * 0.0014 + micVisual * 0.0013 + styleLsd * 0.0018 + styleCrossover * 0.0009);
+        pu.chromaticOffset.value = Math.min(0.012, activeProfile.ca + touchIntensity * 0.0008 + dblFlash * 0.0012 + bassHit * 0.001 + micVisual * 0.001 + styleLsd * 0.0011 + styleCrossover * 0.0007);
         const focusBreath = keysPressed.size === 0 ? 0.04 * Math.sin(now * 0.1) : 0;
         const idleBreath = idleIntensity * (0.06 * Math.sin(now * 0.15) + 0.04);
-        pu.textureLayerMix.value = idleIntensity;
+        pu.textureLayerMix.value = idleIntensity * 0.72;
         pu.bloomStrength.value = Math.min(4.2, (activeProfile.bloom + dblFlash * 1.35 + touchIntensity * 0.5 + audioBoost * 1.0 + micVisual * 0.78 + focusBreath + idleBreath + gestureBloom + 0.06 * syncA + styleMuseum * 0.16 + styleCrossover * 0.14) * 0.76);
-        pu.spiralAmt.value = Math.min(0.32, curSpiral * 0.14 + touchIntensity * 0.018 + trebleLevel * 0.024 + gestureSpiral * 0.12 + 0.006 * syncB + styleLsd * 0.016);
-        pu.flowAmt.value = Math.min(1.7, curFlow + touchIntensity * 0.1 + 0.04 * syncA + styleMuseum * 0.14);
-        pu.pulseAmt.value = Math.min(1.7, curPulse + midLevel * 0.15 + 0.03 * syncA + styleCrossover * 0.12);
-        pu.shearAmt.value = Math.min(1.8, curShear + touchIntensity * 0.1 + 0.03 * syncB + styleMuseum * 0.08);
-        pu.waveAmt.value = Math.min(1.8, curWave + trebleLevel * 0.2 + 0.04 * syncB + styleLsd * 0.2);
-        pu.glitchAmt.value = Math.min(1.25, curGlitch + dblFlash * 0.42 + bassHit * 0.28 + gestureGlitch + styleLsd * 0.22 + styleCrossover * 0.1 + audioEnergy * 0.08 + touchIntensity * 0.05);
+        pu.spiralAmt.value = Math.min(0.2, curSpiral * 0.11 + touchIntensity * 0.012 + trebleLevel * 0.016 + gestureSpiral * 0.08 + 0.004 * syncB + styleLsd * 0.01);
+        pu.flowAmt.value = Math.min(1.24, curFlow + touchIntensity * 0.07 + 0.03 * syncA + styleMuseum * 0.1);
+        pu.pulseAmt.value = Math.min(1.26, curPulse + midLevel * 0.12 + 0.022 * syncA + styleCrossover * 0.09);
+        pu.shearAmt.value = Math.min(1.32, curShear + touchIntensity * 0.07 + 0.02 * syncB + styleMuseum * 0.06);
+        pu.waveAmt.value = Math.min(1.32, curWave + trebleLevel * 0.14 + 0.026 * syncB + styleLsd * 0.12);
+        pu.glitchAmt.value = Math.min(0.82, curGlitch + dblFlash * 0.26 + bassHit * 0.18 + gestureGlitch * 0.88 + styleLsd * 0.14 + styleCrossover * 0.08 + audioEnergy * 0.05 + touchIntensity * 0.04);
         pu.mirrorXY.value.set(curMirrorX, curMirrorY);
-        pu.warpAmt.value = Math.min(1.55, curWarp + touchIntensity * 0.14 + midLevel * 0.18 + micVisual * 0.24 + gestureWarp + 0.035 * syncA + styleCrossover * 0.18 + styleLsd * 0.12);
-        pu.contrastBoost.value = Math.min(3.1, curContrast + dblFlash * 0.42 + bassHit * 0.34 + styleMuseum * 0.14 + styleCrossover * 0.12 + audioBoost * 0.06);
+        pu.warpAmt.value = Math.min(1.12, curWarp + touchIntensity * 0.1 + midLevel * 0.12 + micVisual * 0.18 + gestureWarp * 0.82 + 0.02 * syncA + styleCrossover * 0.12 + styleLsd * 0.08);
+        pu.contrastBoost.value = Math.min(3.2, Math.max(1.28, curContrast + 0.14 + dblFlash * 0.34 + impactFlash * 0.42 + bassHit * 0.24 + styleMuseum * 0.12 + styleCrossover * 0.14 + audioBoost * 0.08));
         pu.headLook.value.set(headOffset_g, headOffsetY);
         pu.themeHue.value = currentKeyHue;
         pu.prismAmt.value = Math.min(1.2, curPrism + styleCrossover * 0.16 + styleLsd * 0.08);
         pu.audioLevel.value = contourAudioLevel;
         pu.bioAmt.value = Math.min(1.0, curBio + styleCrossover * 0.12 + micVisual * 0.08);
-        const pixelMixTarget = Math.min(1.0, PIXEL_MODE_VALUES[pixelModeIdx] + styleLsd * 0.09 + audioEnergy * 0.06);
-        const analogMixTarget = Math.min(1.0, ANALOG_MODE_VALUES[analogModeIdx] + styleMuseum * 0.08 + midLevel * 0.06 + micVisual * 0.05);
+        pu.impactFlash.value = Math.min(1.0, impactFlash + dblFlash * 0.12 + bassHit * 0.06);
+        const pixelMixTarget = Math.min(1.0, PIXEL_MODE_VALUES[pixelModeIdx] * 0.9 + styleLsd * 0.07 + audioEnergy * 0.04);
+        const analogMixTarget = Math.min(1.0, ANALOG_MODE_VALUES[analogModeIdx] * 0.92 + styleMuseum * 0.06 + midLevel * 0.04 + micVisual * 0.04);
         pu.pixelateMix.value += (pixelMixTarget - pu.pixelateMix.value) * 0.22;
         pu.analogMix.value += (analogMixTarget - pu.analogMix.value) * 0.22;
         pu.subpixelMix.value = Math.min(1.0, 0.3 + pu.pixelateMix.value * 0.56 + pu.analogMix.value * 0.24);
@@ -4064,8 +4828,10 @@ import { initMidiPlayer } from './midi-player.js';
         renderer.render(scene, camera);
         renderer.setRenderTarget(null);
         renderer.render(postScene, postCamera);
+        renderRollOverlay();
       } else {
         renderer.render(scene, camera);
+        renderRollOverlay();
       }
     } catch (e) {
       console.warn('Render error:', e && e.message ? e.message : e);

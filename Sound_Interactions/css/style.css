@@ -3,6 +3,16 @@
   border-radius: 0 !important;
 }
 
+:root {
+  --ui-code-font: "Lucida Console", "Cascadia Mono", "Consolas", "Courier New", monospace;
+  --ui-text-main: rgba(230, 242, 255, 0.9);
+  --ui-text-soft: rgba(184, 212, 238, 0.82);
+  --ui-panel-top: rgba(14, 34, 64, 0.42);
+  --ui-panel-bottom: rgba(8, 16, 30, 0.18);
+  --ui-panel-line: rgba(168, 206, 238, 0.3);
+  --ui-panel-glow: rgba(96, 164, 220, 0.22);
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -10,7 +20,7 @@ html, body {
   overflow: hidden;
   background: #0a0a0a;
   cursor: default;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-family: "Tahoma", "MS Sans Serif", "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -129,43 +139,106 @@ html, body {
   transform: translateX(-50%) translateY(-6px);
 }
 
-/* Floating MIDI UI — no footer: panel + progress pill above effect */
+.hud-top-menu {
+  position: fixed;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 97vw;
+  z-index: 1450;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 4px 10px;
+  color: var(--ui-text-main);
+  font: 11px/1.14 var(--ui-code-font);
+  letter-spacing: 0.045em;
+  background: linear-gradient(180deg, var(--ui-panel-top), var(--ui-panel-bottom));
+  border: 1px solid var(--ui-panel-line);
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.26),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.44),
+    0 0 12px var(--ui-panel-glow);
+  text-shadow: 0 0 7px rgba(120, 194, 255, 0.24);
+  -webkit-backdrop-filter: blur(2px) saturate(1.03);
+  backdrop-filter: blur(2px) saturate(1.03);
+}
+
+/* Windows 95 inspired MIDI UI */
 .midi-float-panel {
   position: fixed;
-  top: 20px;
-  right: 20px;
+  top: 12px;
+  right: 12px;
   z-index: 1100;
-  max-width: 300px;
-  padding: 14px 16px;
-  border-radius: 0;
-  background: rgba(18, 18, 20, 0.82);
-  -webkit-backdrop-filter: blur(20px) saturate(1.1);
-  backdrop-filter: blur(20px) saturate(1.1);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  max-width: 370px;
+  padding: 10px 11px;
+  background: #c0c0c0;
+  border: 2px solid #000;
+  box-shadow:
+    inset -1px -1px 0 #808080,
+    inset 1px 1px 0 #fff,
+    inset -2px -2px 0 #000,
+    inset 2px 2px 0 #dfdfdf,
+    0 4px 0 rgba(0, 0, 0, 0.35);
   isolation: isolate;
 }
 .midi-progress-wrap.midi-progress-float {
   position: fixed;
-  right: 20px;
-  bottom: 22px;
+  right: 12px;
+  bottom: 12px;
   left: auto;
   transform: none;
-  width: 220px;
-  height: 14px;
+  width: 410px;
+  height: 34px;
   z-index: 1120;
-  padding: 0;
-  isolation: isolate;
+  padding: 1px;
+  background: linear-gradient(180deg, var(--ui-panel-top), var(--ui-panel-bottom));
+  border: 1px solid var(--ui-panel-line);
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.24),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.44),
+    0 0 12px var(--ui-panel-glow);
+  -webkit-backdrop-filter: blur(2px) saturate(1.05);
+  backdrop-filter: blur(2px) saturate(1.05);
+}
+.midi-progress-wrap.midi-progress-float[data-playing="1"] {
+  animation: midi-progress-breathe 2.6s ease-in-out infinite;
 }
 .midi-progress-wrap.midi-progress-float .midi-progress-bar {
+  position: relative;
   width: 100%;
   height: 100%;
-  border-radius: 0;
-  border: none;
-  background: linear-gradient(90deg, rgba(10, 14, 20, 0.72), rgba(8, 12, 18, 0.8));
+  border: 1px solid rgba(132, 176, 210, 0.3);
+  background:
+    radial-gradient(130% 220% at 50% 100%, rgba(84, 136, 184, 0.18), rgba(6, 14, 24, 0) 52%),
+    linear-gradient(180deg, rgba(6, 14, 24, 0.84), rgba(8, 18, 30, 0.5));
   box-shadow:
-    inset 0 0 14px rgba(0, 0, 0, 0.5),
-    0 0 10px rgba(255, 255, 255, 0.16);
+    inset 1px 1px 0 rgba(200, 234, 255, 0.12),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.62);
+}
+.midi-progress-wrap.midi-progress-float .midi-progress-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(130, 202, 255, 0.08) 0px,
+      rgba(130, 202, 255, 0.08) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(120, 180, 236, 0.03) 0px,
+      rgba(120, 180, 236, 0.03) 1px,
+      transparent 1px,
+      transparent 6px
+    );
+  opacity: 0.48;
+  mix-blend-mode: screen;
+  pointer-events: none;
 }
 .midi-progress-wrap.midi-progress-float .midi-progress-fill {
   left: 0;
@@ -174,12 +247,39 @@ html, body {
   bottom: auto;
   width: 0%;
   height: 100%;
-  border-radius: 0;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.95));
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.32);
+  background: linear-gradient(90deg, rgba(156, 214, 255, 0.42), rgba(244, 251, 255, 0.94));
+  box-shadow:
+    0 0 5px rgba(176, 224, 255, 0.42),
+    inset 0 0 6px rgba(255, 255, 255, 0.42);
 }
 .midi-progress-wrap.midi-progress-float .midi-progress-wave {
-  opacity: 0.52;
+  opacity: 0.8;
+  mix-blend-mode: screen;
+}
+.midi-progress-wrap.midi-progress-float[data-playing="1"] .midi-progress-wave {
+  animation: midi-progress-wave-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes midi-progress-breathe {
+  0%, 100% {
+    box-shadow:
+      inset 1px 1px 0 rgba(255, 255, 255, 0.24),
+      inset -1px -1px 0 rgba(0, 0, 0, 0.44),
+      0 0 12px var(--ui-panel-glow);
+    filter: saturate(1) brightness(1);
+  }
+  50% {
+    box-shadow:
+      inset 1px 1px 0 rgba(255, 255, 255, 0.28),
+      inset -1px -1px 0 rgba(0, 0, 0, 0.48),
+      0 0 18px rgba(132, 200, 255, 0.32);
+    filter: saturate(1.08) brightness(1.05);
+  }
+}
+
+@keyframes midi-progress-wave-breathe {
+  0%, 100% { opacity: 0.78; }
+  50% { opacity: 0.96; }
 }
 
 /* Legacy player bar (when #player-bar-root exists) */
@@ -223,20 +323,23 @@ html, body {
   flex-wrap: wrap;
 }
 .player-midi-toggle {
-  padding: 6px 14px;
+  padding: 4px 10px;
   border-radius: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.9);
-  font: 11px/1.4 -apple-system, system-ui, sans-serif;
-  font-weight: 500;
-  letter-spacing: 0.03em;
+  border: 1px solid #000;
+  background: #c0c0c0;
+  color: #000;
+  font: 11px/1.25 "Tahoma", "MS Sans Serif", sans-serif;
+  letter-spacing: 0.02em;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  box-shadow:
+    inset -1px -1px 0 #808080,
+    inset 1px 1px 0 #fff,
+    inset -2px -2px 0 #000,
+    inset 2px 2px 0 #dfdfdf;
+  transition: filter 0.12s ease;
 }
 .player-midi-toggle:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.18);
+  filter: brightness(1.03);
 }
 .player-midi-drawer {
   max-height: 0;
@@ -249,21 +352,30 @@ html, body {
 
 /* MIDI panel (floating or inside drawer) */
 .midi-player {
-  padding: 12px 0 4px;
+  padding: 6px 0 2px;
   pointer-events: auto;
-  font: 11px/1.5 -apple-system, system-ui, sans-serif;
-  color: rgba(255, 255, 255, 0.92);
+  font: 11px/1.35 "Tahoma", "MS Sans Serif", sans-serif;
+  color: #0a0a0a;
   background: transparent;
-  min-width: 180px;
+  min-width: 280px;
   border: none;
+  letter-spacing: 0.01em;
 }
 .midi-player:hover {
   background: transparent;
 }
+.midi-player-inline {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 2px 0 4px;
+}
 .midi-player-label {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   cursor: default;
+  white-space: nowrap;
 }
 .midi-player-file {
   margin-left: 4px;
@@ -271,78 +383,116 @@ html, body {
   font-size: 10px;
 }
 .midi-player-tracks {
-  margin: 6px 0;
-  max-height: 100px;
+  margin: 6px 0 4px;
+  max-height: 120px;
   overflow-y: auto;
   scrollbar-width: thin;
+  border: 1px solid #000;
+  background: #fff;
+  padding: 3px 4px;
 }
 .midi-player-track {
-  display: block;
-  margin: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
   cursor: pointer;
   padding: 1px 0;
 }
 .midi-player-track:hover {
-  color: rgba(255, 255, 255, 1);
+  background: rgba(0, 0, 128, 0.08);
+}
+.midi-track-swatch {
+  width: 9px;
+  height: 9px;
+  border: 1px solid #222;
+  flex: 0 0 auto;
 }
 .midi-player-select {
-  margin-left: 4px;
-  padding: 2px 6px;
+  margin-left: 3px;
+  padding: 1px 4px;
   border-radius: 0;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.08);
-  color: inherit;
+  border: 1px solid #000;
+  background: #fff;
+  color: #000;
   font: inherit;
   cursor: pointer;
 }
 .midi-player-info {
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+  color: #101010;
   margin: 4px 0;
+}
+.midi-player-metrics {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1px 9px;
+  font-size: 10px;
+  color: #242424;
+  margin-bottom: 4px;
+  padding: 4px;
+  border: 1px solid #000;
+  background: #e6e6e6;
+}
+.midi-player-metrics span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.midi-player-metrics .midi-metrics-wide {
+  grid-column: 1 / -1;
 }
 .midi-player-buttons {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 6px;
+  margin-top: 6px;
 }
 .midi-player-btn {
-  padding: 8px 20px;
+  padding: 4px 10px;
   border-radius: 0;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.95);
-  font: 12px/1.3 -apple-system, system-ui, sans-serif;
-  font-weight: 500;
+  border: 1px solid #000;
+  background: #c0c0c0;
+  color: #000;
+  font: 11px/1.2 "Tahoma", "MS Sans Serif", sans-serif;
+  font-weight: 400;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+  letter-spacing: 0.04em;
+  box-shadow:
+    inset -1px -1px 0 #808080,
+    inset 1px 1px 0 #fff,
+    inset -2px -2px 0 #000,
+    inset 2px 2px 0 #dfdfdf;
+  transition: filter 0.12s ease;
 }
 .midi-player-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.25);
+  filter: brightness(1.03);
 }
 .midi-player-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.55;
   cursor: not-allowed;
+}
+.midi-player-btn-tap {
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 /* Progress bar: inside player bar, wave = complexity */
 .midi-progress-wrap {
   width: 100%;
-  padding: 0 2px;
+  padding: 0;
 }
 .midi-progress-bar {
   position: relative;
-  height: 26px;
+  height: 100%;
   border-radius: 0;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(9, 14, 24, 0.72), rgba(6, 10, 18, 0.86));
+  background: #111822;
   border: none;
   cursor: pointer;
-  transition: background 0.2s ease, box-shadow 0.2s ease;
+  transition: filter 0.12s ease;
 }
 .midi-progress-bar:hover {
-  background: linear-gradient(180deg, rgba(12, 18, 30, 0.76), rgba(8, 12, 22, 0.9));
-  box-shadow: 0 0 16px rgba(80, 180, 255, 0.18);
+  filter: brightness(1.05);
 }
 .midi-progress-wave {
   position: absolute;
@@ -360,6 +510,125 @@ html, body {
   height: 100%;
   width: 0%;
   pointer-events: none;
-  background: linear-gradient(90deg, rgba(80, 210, 255, 0.38) 0%, rgba(120, 255, 255, 0.2) 100%);
+  background: linear-gradient(90deg, rgba(245, 250, 255, 0.4) 0%, rgba(255, 255, 255, 0.94) 100%);
   border-radius: 0;
+}
+
+/* Main-screen piano roll */
+.midi-roll-overlay {
+  position: fixed;
+  left: 3.2%;
+  right: 3.2%;
+  bottom: 34px;
+  height: 36vh;
+  min-height: 220px;
+  max-height: 430px;
+  z-index: 1110;
+  pointer-events: none;
+}
+.midi-roll-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  cursor: crosshair;
+  pointer-events: auto;
+  mix-blend-mode: screen;
+  opacity: 0.88;
+}
+.midi-roll-meta {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 6px;
+  color: var(--ui-text-main);
+  background: linear-gradient(90deg, rgba(8, 34, 72, 0.24), rgba(16, 132, 208, 0.11));
+  border-top: 1px solid var(--ui-panel-line);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.42);
+  font: 10px/1 var(--ui-code-font);
+  letter-spacing: 0.07em;
+  text-shadow: 0 0 8px rgba(120, 194, 255, 0.22);
+  pointer-events: none;
+}
+.midi-roll-info {
+  position: absolute;
+  top: 20px;
+  max-width: 46%;
+  padding: 2px 6px;
+  color: var(--ui-text-main);
+  background: linear-gradient(180deg, rgba(8, 28, 58, 0.22), rgba(16, 108, 174, 0.1));
+  border: 1px solid rgba(162, 196, 226, 0.26);
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.2),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.42),
+    0 0 8px rgba(85, 165, 226, 0.14);
+  font: 10px/1.06 var(--ui-code-font);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 0 8px rgba(120, 194, 255, 0.18);
+  pointer-events: none;
+}
+.midi-roll-info-left {
+  left: 8px;
+}
+.midi-roll-info-right {
+  right: 8px;
+  text-align: right;
+}
+.midi-roll-tooltip {
+  position: absolute;
+  min-width: 136px;
+  max-width: 220px;
+  padding: 4px 7px;
+  border: 1px solid rgba(160, 200, 236, 0.44);
+  background: linear-gradient(180deg, rgba(12, 28, 48, 0.84), rgba(8, 16, 30, 0.64));
+  color: rgba(232, 244, 255, 0.95);
+  font: 11px/1.3 var(--ui-code-font);
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.2),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.5),
+    0 0 10px rgba(110, 190, 255, 0.2);
+  pointer-events: none;
+}
+
+@media (max-width: 720px) {
+  .midi-float-panel {
+    right: 8px;
+    top: 8px;
+    max-width: 284px;
+  }
+  .midi-progress-wrap.midi-progress-float {
+    right: 8px;
+    bottom: 8px;
+    width: 300px;
+    height: 28px;
+    padding: 1px;
+  }
+  .midi-roll-overlay {
+    left: 2.4%;
+    right: 2.4%;
+    height: 30vh;
+    min-height: 170px;
+    bottom: 28px;
+  }
+  .midi-roll-meta {
+    font-size: 9px;
+    height: 14px;
+  }
+  .midi-roll-info {
+    top: 16px;
+    max-width: 48%;
+    font-size: 9px;
+    padding: 1px 4px;
+  }
 }

@@ -41,22 +41,28 @@ const server = http.createServer((req, res) => {
   });
 });
 
-let currentPort = PORT;
+let currentPort = Number(PORT) || 3000;
+let announced = false;
 
 function tryListen() {
-  server.listen(currentPort, () => {
-    console.log('Sound Matrix: http://localhost:' + currentPort);
-  });
+  server.listen(currentPort);
 }
+
+server.on('listening', () => {
+  if (announced) return;
+  announced = true;
+  console.log('Sound Matrix: http://localhost:' + currentPort);
+});
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    currentPort++;
+    currentPort += 1;
+    announced = false;
     console.log('Port in use, trying http://localhost:' + currentPort + ' ...');
-    tryListen();
-  } else {
-    throw err;
+    setTimeout(tryListen, 10);
+    return;
   }
+  throw err;
 });
 
 tryListen();
