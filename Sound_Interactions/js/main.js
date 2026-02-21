@@ -19,11 +19,10 @@ import { initMidiPlayer } from './midi-player.js';
     return 48 + (2 - row) * 12 + COL_TO_SEMITONE[col];
   }
   function midiToCell(midi) {
-    const m = snapToNatural(midi);
+    const m = Math.max(0, Math.min(127, Math.round(midi)));
     const row = Math.max(0, Math.min(2, 2 - Math.floor((m - 48) / 12)));
-    const st = m % 12;
-    const colMap = { 0: 0, 2: 2, 4: 3, 5: 4, 7: 5, 9: 7, 11: 8 };
-    return { col: colMap[st] !== undefined ? colMap[st] : 0, row };
+    const st = ((m % 12) + 12) % 12;
+    return { col: st, row };
   }
   function getCellFromMouse(clientX, clientY) {
     const w = window.innerWidth, h = window.innerHeight;
@@ -63,6 +62,7 @@ import { initMidiPlayer } from './midi-player.js';
     if (!profiles || profiles.length === 0) return null;
     const w = 1 / profiles.length;
     let bFolds = 0, bBloom = 0, bCa = 0, bSpiral = 0, bFlow = 0, bPulse = 0, bPrism = 0;
+    let bBio = 0, bRot = 0;
     let bIn = 0, bOut = 0;
     let bShear = 0, bWave = 0, bGlitch = 0, bWarp = 0, bContrast = 0;
     let bMxScore = 0, bMyScore = 0;
@@ -75,6 +75,8 @@ import { initMidiPlayer } from './midi-player.js';
       bFlow += (p.flow || 0) * w;
       bPulse += (p.pulse || 0) * w;
       bPrism += (p.prism || 0.62) * w;
+      bBio += (p.bio != null ? p.bio : 0.35) * w;
+      bRot += (p.rot || 0) * w;
       bIn += (p.in != null ? p.in : 0.56) * w;
       bOut += (p.out != null ? p.out : 0.26) * w;
       bShear += (p.shear || 0) * w;
@@ -87,7 +89,7 @@ import { initMidiPlayer } from './midi-player.js';
       hues.push(p.hue);
     });
     const chordBoost = 1 + Math.max(0, keyCount - 1) * chordStep;
-    const spiral = softCap(bSpiral * chordBoost, 1.55);
+    const spiral = softCap(bSpiral * chordBoost, 0.88);
     const flow = softCap(bFlow * chordBoost, 1.45);
     const pulse = softCap(bPulse * chordBoost, 1.5);
     const shear = softCap(bShear * chordBoost, 1.45);
@@ -97,7 +99,7 @@ import { initMidiPlayer } from './midi-player.js';
     return {
       folds: bFolds,
       bloom: bBloom * chordBoost,
-      ca: bCa * chordBoost,
+      ca: Math.min(0.014, bCa * chordBoost * 0.68),
       spiral,
       flow,
       pulse,
@@ -106,9 +108,11 @@ import { initMidiPlayer } from './midi-player.js';
       glitch,
       warp,
       prism: softCap(bPrism * (1 + Math.max(0, keyCount - 1) * 0.06), 1.08),
+      bio: softCap(bBio * (1 + Math.max(0, keyCount - 1) * 0.04), 1.05),
+      rot: Math.max(-1, Math.min(1, bRot * (1 + Math.max(0, keyCount - 1) * 0.08))),
       contrast: Math.min(2.85, bContrast * chordBoost),
-      in: Math.min(0.72, bIn + Math.max(0, keyCount - 1) * 0.015),
-      out: Math.min(0.46, bOut + Math.max(0, keyCount - 1) * 0.012),
+      in: Math.min(0.9, bIn + Math.max(0, keyCount - 1) * 0.02),
+      out: Math.min(0.64, bOut + Math.max(0, keyCount - 1) * 0.016),
       mx: bMxScore > 0.44 ? 1 : 0,
       my: bMyScore > 0.44 ? 1 : 0,
       hue: circularHueMean(hues)
@@ -134,13 +138,15 @@ import { initMidiPlayer } from './midi-player.js';
       let hit = 0;
       for (let j = 0; j < cols.length; j++) if (group.includes(cols[j])) hit++;
       const density = Math.pow(hit / Math.max(1, count), 0.82);
-      const base = isKeyActive ? (0.12 + str * 0.88) : (0.06 + str * 0.32);
+      const base = isKeyActive ? (0.18 + str * 1.02) : (0.08 + str * 0.36);
       out[k] = Math.max(0, Math.min(1, density * base));
     }
     return out;
   }
+  const STYLE_COL_MAP = ['museum', 'lsd', 'museum', 'lsd', 'museum', 'lsd', 'lsd', 'museum', 'lsd', 'museum', 'lsd', 'museum'];
   function styleFromCol(col) {
-    return (col % 2 === 0) ? 'museum' : 'lsd';
+    const idx = ((col % GRID_COLS) + GRID_COLS) % GRID_COLS;
+    return STYLE_COL_MAP[idx];
   }
   function styleBlendFromCols(cols, fallbackCol) {
     const arr = cols && cols.length ? cols : [fallbackCol];
@@ -167,6 +173,33 @@ import { initMidiPlayer } from './midi-player.js';
       lsd: lsdRatio,
       crossover: Math.max(balance * 0.75, interleave * 0.95)
     };
+  }
+  const HARMONY_MODES = ['off', 'auto3', 'maj3', 'min3', 'fifth', 'ninth'];
+  const HARMONY_MODE_LABEL = { off: 'OFF', auto3: 'AUTO3', maj3: 'MAJ3', min3: 'MIN3', fifth: '5TH', ninth: '9TH' };
+  let harmonyModeIdx = 0;
+  function getHarmonyMode() {
+    return HARMONY_MODES[harmonyModeIdx] || 'off';
+  }
+  function cycleHarmonyMode() {
+    harmonyModeIdx = (harmonyModeIdx + 1) % HARMONY_MODES.length;
+    return getHarmonyMode();
+  }
+  function getSmartThirdSemitone(midi) {
+    const pc = ((midi % 12) + 12) % 12;
+    const diatonicMap = { 0: 4, 2: 3, 4: 3, 5: 4, 7: 4, 9: 3, 11: 3 };
+    let semi = diatonicMap[pc] != null ? diatonicMap[pc] : 3;
+    // LSD-leaning scenes bias slightly darker harmony; museum-leaning keeps brighter third.
+    if (styleLsd > styleMuseum + 0.16) semi = 3;
+    if (styleMuseum > styleLsd + 0.2) semi = 4;
+    return semi;
+  }
+  function getHarmonySemitone(mode, midi) {
+    if (mode === 'auto3' || mode === 'third') return getSmartThirdSemitone(midi);
+    if (mode === 'maj3') return 4;
+    if (mode === 'min3') return 3;
+    if (mode === 'fifth') return 7;
+    if (mode === 'ninth') return 14;
+    return 0;
   }
 
   let scene, camera, renderer, gpuCompute, positionVariable, velocityVariable;
@@ -200,6 +233,10 @@ import { initMidiPlayer } from './midi-player.js';
   let displayedMidiNotes = []; // current MIDI chord for text display (every note)
   let composer, postScene, postCamera, postQuad, rtScene;
   const particleMatOpts = { transparent: true, sizeAttenuation: true, vertexColors: false, blending: THREE.AdditiveBlending, depthWrite: false };
+  let noteRepeatOverlayEl = null;
+  let noteRepeatRowEls = [];
+  let noteRepeatSignature = '';
+  let noteRepeatStyleEl = null;
 
   const velocityShader = `
     uniform float time;
@@ -255,40 +292,102 @@ import { initMidiPlayer } from './midi-player.js';
     // Background: dynamic aurora / nebula with stars
     const bgGeo = new THREE.PlaneGeometry(20, 20);
     const bgMat = new THREE.ShaderMaterial({
-      uniforms: { time: { value: 0 }, activeHue: { value: 0.55 } },
+      uniforms: { time: { value: 0 }, activeHue: { value: 0.55 }, audioLevel: { value: 0 } },
       vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
       fragmentShader: `
         #define PI 3.14159265359
-        uniform float time; uniform float activeHue;
+        uniform float time; uniform float activeHue; uniform float audioLevel;
         varying vec2 vUv;
         float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+        vec2 hash2(vec2 p){
+          return fract(sin(vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3))))*43758.5453);
+        }
         float noise(vec2 p){
           vec2 i=floor(p); vec2 f=fract(p); f=f*f*(3.0-2.0*f);
           return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);
         }
-        float fbm(vec2 p){ float f=0.0; f+=0.5*noise(p); p*=2.01; f+=0.25*noise(p); p*=2.02; f+=0.125*noise(p); p*=2.03; f+=0.0625*noise(p); return f; }
+        float fbm(vec2 p){
+          float f=0.0;
+          float a=0.5;
+          for(int i=0;i<5;i++){
+            f+=a*noise(p);
+            p=p*2.02+vec2(13.7,7.3);
+            a*=0.5;
+          }
+          return f;
+        }
+        mat2 rot(float a){ float s=sin(a), c=cos(a); return mat2(c,-s,s,c); }
+        vec2 voronoi(vec2 uv){
+          vec2 i=floor(uv);
+          vec2 f=fract(uv);
+          float d1=10.0;
+          float d2=10.0;
+          for(float y=-1.0;y<=1.0;y+=1.0){
+            for(float x=-1.0;x<=1.0;x+=1.0){
+              vec2 g=vec2(x,y);
+              vec2 o=hash2(i+g);
+              vec2 p=g+0.5+0.42*sin(o*6.2831+time*0.2)-f;
+              float d=dot(p,p);
+              if(d<d1){ d2=d1; d1=d; } else if(d<d2){ d2=d; }
+            }
+          }
+          return vec2(sqrt(d1),sqrt(max(0.0,d2-d1)));
+        }
         vec3 hsl(float h,float s,float l){ vec3 k=vec3(1.0,2.0/3.0,1.0/3.0); vec3 p=clamp(abs(fract(vec3(h)+k)*6.0-3.0)-1.0,0.0,1.0); return l*mix(vec3(1.0),p,s); }
         void main(){
-          vec2 c=vUv-0.5; float d=length(c); float a=atan(c.y,c.x); float t=time*0.11;
-          float n1=fbm(vUv*2.8+vec2(t*0.8,-t*0.5));
-          float n2=fbm(vUv*4.9+vec2(-t*0.7,t*0.35));
-          float n3=fbm(vec2(a*1.6+t,d*5.2-t*0.35));
-          float breathe=0.5+0.5*sin(time*0.45);
-          vec3 base=mix(vec3(0.016,0.012,0.035),vec3(0.024,0.018,0.05),breathe);
-          vec3 nebA=hsl(activeHue,0.82,0.12)*n1;
-          vec3 nebB=hsl(activeHue+0.18,0.74,0.10)*n2;
-          vec3 nebC=hsl(activeHue+0.52,0.68,0.08)*n3;
-          float ring = exp(-pow((d-(0.24+0.06*sin(time*0.38)))*6.2,2.0));
-          float ring2 = exp(-pow((d-(0.42+0.05*cos(time*0.31)))*7.0,2.0));
-          vec3 ringCol = hsl(activeHue+0.1,0.72,0.22)*ring*0.38 + hsl(activeHue+0.58,0.68,0.2)*ring2*0.26;
-          float arc = pow(max(0.0,cos(a*6.0-time*0.6)),5.0)*(0.22+0.45*ring2);
-          vec3 arcCol = hsl(activeHue+0.3,0.7,0.24)*arc*0.25;
-          vec3 col=base+nebA+nebB+nebC+ringCol+arcCol;
-          col*=mix(1.02,0.34,smoothstep(0.0,0.88,d));
-          float star1=step(0.9974,hash(floor(vUv*360.0)));
-          float star2=step(0.9988,hash(floor(vUv*240.0+31.0)));
-          float twinkle=0.55+0.45*sin(time*2.4+hash(floor(vUv*360.0))*140.0);
-          col+=(star1+star2*0.6)*0.12*vec3(0.86,0.9,1.0)*twinkle;
+          vec2 uv=vUv;
+          vec2 c=uv-0.5;
+          float r=length(c);
+          float a=atan(c.y,c.x);
+          float syncA=sin(time*0.45);
+          float syncB=sin(time*0.38+1.0);
+          float breathe=0.5+0.5*syncA;
+          float lvl=clamp(audioLevel,0.0,1.0);
+          float centerBlank=1.0-smoothstep(0.0,0.24,r);
+          float outerMask=smoothstep(0.22,0.74,r)*(1.0-smoothstep(0.9,1.08,r));
+
+          vec2 rc=rot(0.12*syncB+0.08*lvl)*c;
+          float nA=fbm(rc*3.2+vec2(time*0.09,-time*0.06));
+          float nB=fbm(rot(-0.32+0.14*syncA)*(c*4.9)+vec2(-time*0.07,time*0.05));
+          float nC=fbm(vec2(a*2.3+time*0.18+lvl*0.5,r*7.8-time*0.15));
+          vec2 v=voronoi(uv*vec2(8.0,5.8)+vec2(time*0.08,-time*0.06));
+          float cell=1.0-smoothstep(0.06,0.24,v.x);
+          float edge=1.0-smoothstep(0.008,0.03,v.y);
+
+          float radialGridA=1.0-smoothstep(0.0,0.018,abs(fract((a/PI)*7.5+0.16*syncB)-0.5));
+          float radialGridB=1.0-smoothstep(0.0,0.016,abs(fract(r*12.0+0.12*syncA)-0.5));
+          float matrix=(1.0-smoothstep(0.0,0.04,abs(fract((uv.x+0.5*sin(time*0.05))*48.0)-0.5)))*
+                       (1.0-smoothstep(0.0,0.13,abs(fract((uv.y+0.5*cos(time*0.04))*22.0)-0.5)));
+          float lsdNoise=fbm(rot(0.52+0.18*syncA)*(c*(7.2+lvl*2.4))+vec2(time*0.24,-time*0.2));
+          float lsdMeshA=1.0-smoothstep(0.0,0.02,abs(fract((a/PI)*(13.0+lvl*7.0)+lsdNoise*1.7+time*0.22)-0.5));
+          float lsdMeshB=1.0-smoothstep(0.0,0.018,abs(fract(r*23.0-lsdNoise*2.1-time*0.26)-0.5));
+          float lsdShard=pow(max(0.0,cos(a*(20.0+lvl*9.0)+time*0.44+sin(r*20.0-time*0.7))),9.0);
+
+          float prismRing1=exp(-pow((r-(0.26+0.05*syncB))*7.3,2.0));
+          float prismRing2=exp(-pow((r-(0.48+0.04*syncA))*8.2,2.0));
+          float fanFold=pow(max(0.0,cos(a*(10.0+lvl*6.0)+time*0.24+sin(r*20.0-time*0.45))),8.0);
+
+          vec3 base=mix(vec3(0.010,0.012,0.028),vec3(0.022,0.018,0.045),breathe);
+          vec3 neb=hsl(activeHue,0.82,0.12)*nA+hsl(activeHue+0.16,0.72,0.10)*nB+hsl(activeHue+0.52,0.64,0.08)*nC;
+          vec3 couture=hsl(activeHue+0.57,0.7,0.2)*pow(radialGridA,1.3)*(0.025+0.04*lvl);
+          vec3 matrixCol=hsl(activeHue+0.21,0.44,0.24)*matrix*(0.018+0.03*(0.5+0.5*syncB)+0.03*lvl);
+          vec3 cellCol=mix(hsl(activeHue+0.08,0.62,0.14),hsl(activeHue+0.64,0.56,0.16),0.5+0.5*sin(time*0.12))*cell*(0.03+0.06*lvl);
+          vec3 ringCol=hsl(activeHue+0.1,0.72,0.24)*prismRing1*(0.24+0.12*lvl)+hsl(activeHue+0.48,0.68,0.22)*prismRing2*(0.18+0.1*lvl);
+          vec3 fanCol=hsl(activeHue+0.34,0.6,0.24)*fanFold*prismRing2*(0.14+0.08*lvl);
+          vec3 lsdDense=hsl(activeHue+0.62,0.72,0.24)*(lsdMeshA*0.58+lsdMeshB*0.42)*(0.026+0.05*lvl)*outerMask;
+          vec3 lsdShards=hsl(activeHue+0.28,0.66,0.26)*lsdShard*(0.02+0.042*lvl)*outerMask;
+
+          vec3 col=base+neb+couture+matrixCol+cellCol+ringCol+fanCol+lsdDense+lsdShards;
+          col+=edge*mix(vec3(0.75,0.9,1.0),hsl(activeHue+0.2,0.5,0.3),0.55)*(0.045+0.06*lvl);
+
+          float star1=step(0.9982,hash(floor(uv*vec2(420.0,250.0))));
+          float star2=step(0.9987,hash(floor(uv*vec2(300.0,200.0)+41.0)));
+          float twinkle=0.52+0.48*sin(time*2.0+hash(floor(uv*vec2(420.0,250.0)))*140.0);
+          col+=(star1+star2*0.65)*0.11*vec3(0.86,0.92,1.0)*twinkle;
+
+          col*=mix(1.0,0.28,smoothstep(0.0,0.96,r));
+          col=mix(col, base+neb*0.58+ringCol*0.42, centerBlank*0.52);
+          col*=1.0+0.09*(1.0-smoothstep(0.0,0.28,r));
           gl_FragColor=vec4(col,1.0);
         }
       `,
@@ -349,7 +448,7 @@ import { initMidiPlayer } from './midi-player.js';
         time: { value: 0 },
         bloomStrength: { value: 1.6 },
         bloomThreshold: { value: 0.3 },
-        chromaticOffset: { value: 0.005 },
+        chromaticOffset: { value: 0.0032 },
         kaleidoFolds: { value: 6.0 },
         kaleidoRotation: { value: 0.0 },
         kaleidoMix: { value: 0.15 },
@@ -365,7 +464,13 @@ import { initMidiPlayer } from './midi-player.js';
         textureLayerMix: { value: 0.0 },
         headLook: { value: new THREE.Vector2(0, 0) },
         themeHue: { value: 0.0 },
-        prismAmt: { value: 0.62 }
+        prismAmt: { value: 0.62 },
+        audioLevel: { value: 0.0 },
+        bioAmt: { value: 0.35 },
+        pixelateMix: { value: 0.58 },
+        analogMix: { value: 0.66 },
+        subpixelMix: { value: 0.58 },
+        jitterMix: { value: 0.45 }
       },
       vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
       fragmentShader: `
@@ -392,6 +497,12 @@ import { initMidiPlayer } from './midi-player.js';
         uniform vec2 headLook;
         uniform float themeHue;
         uniform float prismAmt;
+        uniform float audioLevel;
+        uniform float bioAmt;
+        uniform float pixelateMix;
+        uniform float analogMix;
+        uniform float subpixelMix;
+        uniform float jitterMix;
         varying vec2 vUv;
         vec3 hueToRgb(float h){
           vec3 k=vec3(1.0,2.0/3.0,1.0/3.0);
@@ -457,10 +568,12 @@ import { initMidiPlayer } from './midi-player.js';
           c+=waveAmt*vec2(sin(c.y*12.0+time*1.2)*0.015*r,sin(c.x*10.0+time*1.0)*0.015*r);
           r=length(c); a=atan(c.y,c.x);
 
-          // Spiral: smooth twist
-          float spiralT=spiralAmt*(r*5.0+time*0.4+0.2*sin(r*6.0-time*1.5));
+          // Spiral is intentionally restrained: favor matrix folds over fan-like spin.
+          float spiralT=spiralAmt*(0.16*r+0.05*sin(time*0.45+r*7.0));
           a+=spiralT;
           c=vec2(cos(a),sin(a))*r;
+          float matrixFold=spiralAmt*0.018*sin((c.x+c.y)*22.0+time*0.85);
+          c+=vec2(matrixFold,-matrixFold*0.8);
 
           // Warp: gentle barrel + ordered breath
           float breath=1.0+warpAmt*(r*r*2.0+0.25*sin(a*3.0+time*1.2)+0.12*cos(r*8.0+time*1.0));
@@ -524,7 +637,7 @@ import { initMidiPlayer } from './midi-player.js';
 
         vec3 prismCA(sampler2D tex, vec2 uv, float off){
           vec2 dir=normalize(uv-0.5+1e-5); float d=length(uv-0.5);
-          float s=off*(0.45+d*(2.7+prismAmt*1.6));
+          float s=off*(0.22+d*(1.38+prismAmt*0.8));
           float r=texture2D(tex,uv+dir*s).r;
           float g=texture2D(tex,uv).g;
           float b=texture2D(tex,uv-dir*s).b;
@@ -554,6 +667,34 @@ import { initMidiPlayer } from './midi-player.js';
           return acc/max(0.0001,wSum);
         }
 
+        vec3 cellularField(vec2 uv, float density, float t){
+          vec2 p=uv*density;
+          vec2 id=floor(p);
+          vec2 f=fract(p)-0.5;
+          float nearest=10.0;
+          float secondN=10.0;
+          float nucleus=0.0;
+          for(float y=-1.0;y<=1.0;y+=1.0){
+            for(float x=-1.0;x<=1.0;x+=1.0){
+              vec2 o=vec2(x,y);
+              vec2 rnd=hash2v(id+o);
+              vec2 jitter=(rnd-0.5)*0.62;
+              vec2 drift=0.16*vec2(sin(t*0.65+rnd.x*6.2831),cos(t*0.55+rnd.y*6.2831));
+              vec2 c=o+jitter+drift;
+              float d=length(f-c);
+              if(d<nearest){
+                secondN=nearest;
+                nearest=d;
+              } else if(d<secondN){
+                secondN=d;
+              }
+              nucleus=max(nucleus,1.0-smoothstep(0.05,0.19,d));
+            }
+          }
+          float membrane=1.0-smoothstep(0.012,0.05,secondN-nearest);
+          return vec3(membrane,nucleus,nearest);
+        }
+
         void main(){
           vec2 uv=vUv;
           vec3 dResult=distortWithEdge(uv);
@@ -561,9 +702,18 @@ import { initMidiPlayer } from './midi-player.js';
           float edgeFactor=dResult.z;
           vec2 finalUv=mix(uv,dUv,kaleidoMix);
           finalUv+=headLook*0.068;
+          float pixScale=1.0+pixelateMix*10.0;
+          vec2 pixStep=vec2(pixScale)/resolution;
+          vec2 pixUv=floor(finalUv/pixStep+0.5)*pixStep;
+          vec2 sampleUv=mix(finalUv,pixUv,pixelateMix);
+          if(jitterMix>0.001){
+            float lineIdx=floor(finalUv.y*resolution.y*0.52+time*(6.0+analogMix*16.0));
+            float lineJ=(hash1(lineIdx*2.37)-0.5)*(0.001+0.0038*jitterMix)*(0.45+0.55*glitchAmt+0.45*analogMix);
+            sampleUv.x=clamp(sampleUv.x+lineJ,0.003,0.997);
+          }
 
           // Base scene with CA
-          vec3 scene=prismCA(tDiffuse,finalUv,chromaticOffset+glitchAmt*0.003);
+          vec3 scene=prismCA(tDiffuse,sampleUv,chromaticOffset+glitchAmt*0.0012);
 
           // --- Optical edge: Fresnel refraction + dispersion ---
           if(edgeFactor>0.005){
@@ -649,16 +799,36 @@ import { initMidiPlayer } from './midi-player.js';
           // themeTint: soft saturation so overlays feel part of the scene, not pasted
           vec3 themeTint=mix(vec3(0.92,0.93,0.96),hueToRgb(themeHue),0.68);
           vec2 c=uv-0.5; float r=length(c); float a=atan(c.y,c.x);
-          // Contour: structure / topography — soft lines that breathe with flow
-          float contour=0.0;
-          vec2 f80=floor(uv*100.0+time*0.02);
-          vec2 f40=floor(uv*50.0-time*0.01);
-          float nElev=hash2(f80)+0.5*hash2(f40);
-          float elev=sin(r*32.0+nElev*6.28)*0.5+0.5;
-          contour+=(1.0-smoothstep(0.0,0.02,abs(fract(elev*24.0)-0.5)))*0.5;
-          contour+=(1.0-smoothstep(0.0,0.016,abs(fract(r*28.0+sin(a*3.0)*2.0)-0.5)))*0.4;
-          contour+=(1.0-smoothstep(0.0,0.018,abs(fract(a*4.0+r*12.0)-0.5)))*0.22;
-          col+=contour*themeTint*(0.055+flowAmt*0.06+textureLayerMix*0.035);
+          // Contour topography: mountain mass/height follows live volume.
+          float reactiveVol=clamp(audioLevel,0.0,1.0);
+          float bioMix=clamp(bioAmt,0.0,1.0);
+          float mountainSize=0.16+0.2*reactiveVol;
+          float mountainHeight=0.85+1.5*reactiveVol;
+          vec2 p1=vec2(0.34+0.08*sin(time*0.18),0.46+0.04*cos(time*0.21));
+          vec2 p2=vec2(0.63+0.07*cos(time*0.14+1.2),0.39+0.05*sin(time*0.17+0.7));
+          vec2 p3=vec2(0.50+0.06*sin(time*0.11+2.2),0.63+0.04*cos(time*0.16+1.4));
+          vec2 d1=(uv-p1)*vec2(1.2,0.95);
+          vec2 d2=(uv-p2)*vec2(1.15,1.05);
+          vec2 d3=(uv-p3)*vec2(1.3,1.0);
+          float m1=exp(-dot(d1,d1)/(0.014+mountainSize*0.09));
+          float m2=exp(-dot(d2,d2)/(0.012+mountainSize*0.08));
+          float m3=exp(-dot(d3,d3)/(0.011+mountainSize*0.07));
+          float ridgeNoise=0.12*sin((uv.x+uv.y)*26.0+time*0.28)+0.08*sin((uv.x-uv.y)*34.0-time*0.24);
+          float mountain=(m1*1.0+m2*0.82+m3*0.68+ridgeNoise*0.22)*mountainHeight;
+          float contourDensity=mix(16.0,34.0,reactiveVol);
+          float contourMajor=(1.0-smoothstep(0.0,0.032,abs(fract(mountain*contourDensity)-0.5)))*0.56;
+          float contourMinor=(1.0-smoothstep(0.0,0.018,abs(fract(mountain*contourDensity*0.46+0.18)-0.5)))*0.3;
+          float contourRadial=(1.0-smoothstep(0.0,0.018,abs(fract((r*20.0+sin(a*3.0))*0.6)-0.5)))*0.2;
+          float contour=contourMajor+contourMinor+contourRadial;
+          float contourIntent=0.16+flowAmt*0.62+bioMix*0.34+reactiveVol*0.2-shearAmt*0.1;
+          float contourMask=smoothstep(0.32,0.84,contourIntent);
+          vec2 mGrad=vec2(dFdx(mountain),dFdy(mountain));
+          float slope=clamp(length(mGrad)*26.0,0.0,1.0);
+          float ridgeLight=pow(1.0-slope,2.0)*(0.08+0.12*reactiveVol);
+          float slopeShade=slope*(0.03+0.05*reactiveVol);
+          col+=contour*themeTint*contourMask*(0.028+flowAmt*0.04+textureLayerMix*0.024+reactiveVol*0.03);
+          col+=themeTint*ridgeLight*(0.03+0.022*flowAmt+0.015*contourMask);
+          col-=vec3(0.01,0.009,0.007)*slopeShade*contourMask;
 
           // Grid: rhythm / lattice — fades from center so focus stays on content
           float grid=0.0;
@@ -667,6 +837,43 @@ import { initMidiPlayer } from './midi-player.js';
           grid+=(1.0-smoothstep(0.0,0.055,abs(fract(g.x)-0.5)))*radialFade;
           grid+=(1.0-smoothstep(0.0,0.055,abs(fract(g.y)-0.5)))*radialFade;
           col+=grid*themeTint*(0.055+shearAmt*0.05+textureLayerMix*0.03);
+          // Matrix veil: adds richness without clutter, tied to wave/shear and loudness.
+          vec2 mv=uv*resolution.xy*0.095+vec2(time*0.24,-time*0.2);
+          float matrixVeil=(1.0-smoothstep(0.0,0.045,abs(fract(mv.x)-0.5)))*(1.0-smoothstep(0.0,0.16,abs(fract(mv.y)-0.5)));
+          col+=matrixVeil*themeTint*(0.018+0.03*shearAmt+0.026*waveAmt+0.02*reactiveVol);
+          // Outer scattered prism shell: replaces excessive contour slicing at frame edge.
+          float outerBand=smoothstep(0.58,0.9,r)*(1.0-smoothstep(0.9,1.05,r));
+          vec2 edgeCell=floor((uv-0.5)*vec2(78.0,78.0));
+          float edgeHash=hash2(edgeCell+floor(time*0.8));
+          float edgeSpark=step(0.935,edgeHash)*(0.45+0.55*sin(time*0.72+edgeHash*15.0+r*24.0));
+          float prismScatter=edgeSpark*outerBand;
+          vec3 prismTint=mix(hueToRgb(themeHue+0.11),hueToRgb(themeHue+0.56),fract(edgeHash*3.7));
+          col+=prismTint*prismScatter*(0.026+0.075*prismAmt+0.02*reactiveVol);
+          // Avant-garde caustic matrix: dense in outer-middle ring, clean center preserved.
+          vec2 cc=uv-0.5;
+          float ang=0.28*sin(time*0.38+1.0)+0.06*audioLevel;
+          vec2 rotCoord=vec2(cc.x*cos(ang)-cc.y*sin(ang),cc.x*sin(ang)+cc.y*cos(ang));
+          vec2 cm=rotCoord*vec2(82.0,62.0)+vec2(time*0.34,-time*0.29);
+          float lineA=1.0-smoothstep(0.0,0.02,abs(fract(cm.x)-0.5));
+          float lineB=1.0-smoothstep(0.0,0.018,abs(fract(cm.y)-0.5));
+          float causticBand=smoothstep(0.22,0.9,r)*(1.0-smoothstep(0.86,1.15,r));
+          float caustic=(lineA*0.64+lineB*0.52)*causticBand;
+          float shardBlink=step(0.928,hash2(floor(cm*0.7)+floor(time*1.6)))*(0.72+0.28*sin(time*0.9+r*16.0));
+          vec3 causticTint=mix(hueToRgb(themeHue+0.2),vec3(0.95,0.98,1.0),0.42);
+          col+=causticTint*caustic*(0.012+0.044*prismAmt+0.018*reactiveVol);
+          col+=causticTint*shardBlink*causticBand*(0.01+0.022*prismAmt);
+
+          // Organic layer: microorganism / cell membranes, tied to profile bio amount.
+          if(bioMix>0.01){
+            float cdens=mix(6.0,13.5,bioMix);
+            vec2 cuv=uv+vec2(0.03*flowAmt*sin(time*0.22),0.025*waveAmt*cos(time*0.18));
+            vec3 cell=cellularField(cuv,cdens,time);
+            float membrane=cell.x;
+            float nucleus=cell.y;
+            vec3 bioTint=mix(hueToRgb(themeHue+0.16),themeTint,0.62);
+            col+=bioTint*membrane*(0.012+0.05*bioMix+0.025*reactiveVol);
+            col+=mix(vec3(0.9,0.97,1.0),bioTint,0.45)*nucleus*(0.008+0.028*bioMix);
+          }
 
           // Heart: emotional pulse — only when pulse profile is active, gentle glow
           float heart=0.0;
@@ -701,10 +908,31 @@ import { initMidiPlayer } from './midi-player.js';
             col+=arch*themeTint*textureLayerMix*0.038;
           }
 
-          // Film texture: very subtle, keep clean premium surface
-          float grain=(hash2(uv*vec2(time*70.0,time*59.0))-0.5)*0.005;
-          float scan=sin(uv.y*resolution.y*3.14159)*0.0025;
-          col+=grain+scan;
+          // Screen / cyber texture: analog computer aesthetics with clean control.
+          float noiseSeed=hash2(floor(uv*resolution*0.82)+vec2(floor(time*47.0),floor(time*53.0)));
+          float grain=(noiseSeed-0.5)*(0.0028+0.0075*analogMix);
+          float scan=sin(uv.y*resolution.y*3.14159*(1.0+0.42*analogMix))*(0.0018+0.0056*analogMix);
+          float crt=sin(uv.y*resolution.y*(1.0+0.25*analogMix)+time*(12.0+10.0*analogMix))*(0.0012+0.0038*analogMix);
+          float pxX=1.0-smoothstep(0.0,0.05,abs(fract(uv.x*resolution.x*(0.2+0.3*pixelateMix))-0.5));
+          float pxY=1.0-smoothstep(0.0,0.07,abs(fract(uv.y*resolution.y*(0.18+0.28*pixelateMix))-0.5));
+          float pixelGrid=pxX*pxY;
+          float glitchBand=step(0.89,hash1(floor(uv.y*56.0)+floor(time*(6.0+analogMix*8.0))));
+          float vRoll=fract(uv.y+time*(0.018+0.06*analogMix));
+          float rollBand=exp(-pow((vRoll-0.03)*34.0,2.0));
+          vec3 cyberTint=mix(hueToRgb(themeHue+0.58),vec3(0.55,0.96,1.0),0.58);
+          vec3 ghost=prismCA(tDiffuse,vec2(clamp(sampleUv.x+scan*2.8,0.003,0.997),sampleUv.y),chromaticOffset*0.45);
+          col=mix(col,ghost,0.1*analogMix+0.1*glitchAmt);
+          col+=grain+scan+crt;
+          col+=cyberTint*pixelGrid*(0.01+0.03*pixelateMix+0.018*glitchAmt+0.018*textureLayerMix);
+          col+=cyberTint*glitchBand*(0.004+0.016*glitchAmt+0.008*analogMix)*(1.0-smoothstep(0.0,0.46,abs(uv.x-0.5)));
+          col+=cyberTint*rollBand*(0.008+0.028*analogMix+0.014*glitchAmt);
+          float stripe=fract(uv.x*resolution.x*0.34);
+          vec3 phosphor=vec3(
+            0.86+0.2*(1.0-smoothstep(0.0,0.34,abs(stripe-0.16))),
+            0.86+0.2*(1.0-smoothstep(0.0,0.34,abs(stripe-0.5))),
+            0.86+0.2*(1.0-smoothstep(0.0,0.34,abs(stripe-0.84)))
+          );
+          col*=mix(vec3(1.0),phosphor,0.26*subpixelMix+0.22*analogMix);
 
           // Vignette + center lift: keep composition focused and readable
           float vig=1.0-smoothstep(0.14,0.92,length((uv-0.5)*1.74));
@@ -727,6 +955,10 @@ import { initMidiPlayer } from './midi-player.js';
           col=mix(col01,cCurve,0.30+0.42*contrastHi);
           col=((col-0.5)*(1.0+0.20+0.32*contrastHi))+0.5;
           col=max(col,0.0);
+          if(pixelateMix>0.01){
+            float cSteps=mix(280.0,64.0,pixelateMix);
+            col=floor(col*cSteps+0.5)/cSteps;
+          }
 
           // Rhythmic blink: very subtle (avoid overexposure)
           float blink=0.5+0.5*sin(time*0.55);
@@ -1153,24 +1385,38 @@ import { initMidiPlayer } from './midi-player.js';
   let curWarp = 0, tgtWarp = 0;
   let curPrism = 0.62, tgtPrism = 0.62;
   let curContrast = 1.22, tgtContrast = 1.22;
+  let curBio = 0.35, tgtBio = 0.35;
+  let curProfileRoll = 0, tgtProfileRoll = 0;
   let styleMuseum = 0.5;
   let styleLsd = 0.5;
   let styleCrossover = 0.0;
+  const PIXEL_MODE_LABELS = ['soft', 'dense', 'hard'];
+  const PIXEL_MODE_VALUES = [0.26, 0.58, 0.9];
+  const ANALOG_MODE_LABELS = ['clean', 'crt', 'vhs'];
+  const ANALOG_MODE_VALUES = [0.3, 0.66, 0.98];
+  const TEXT_MODE_LABELS = ['clean', 'glitch', 'overclock'];
+  const TEXT_GLITCH_VALUES = [0.72, 1.08, 1.48];
+  let pixelModeIdx = 1;
+  let analogModeIdx = 1;
+  let textModeIdx = 1;
+  function cyclePixelMode() { pixelModeIdx = (pixelModeIdx + 1) % PIXEL_MODE_VALUES.length; return PIXEL_MODE_LABELS[pixelModeIdx]; }
+  function cycleAnalogMode() { analogModeIdx = (analogModeIdx + 1) % ANALOG_MODE_VALUES.length; return ANALOG_MODE_LABELS[analogModeIdx]; }
+  function cycleTextMode() { textModeIdx = (textModeIdx + 1) % TEXT_GLITCH_VALUES.length; return TEXT_MODE_LABELS[textModeIdx]; }
   // KEY_PROFILES visual personality tuning table:
   // contour / kaleido / radiation / symmetry / optical-lsd are balanced per key.
   const KEY_PROFILES = [
-    { name:'Contour Prime', folds:6,  hue:0.01, bloom:2.35, ca:0.009, spiral:0.10, flow:0.96, pulse:0.14, shear:0.06, wave:0.34, glitch:0.05, mx:0, my:0, warp:0.28, prism:0.64, contrast:2.06, in:0.56, out:0.28 },
-    { name:'Glass Mandala', folds:26, hue:0.54, bloom:2.85, ca:0.012, spiral:0.18, flow:0.12, pulse:0.28, shear:0.06, wave:0.10, glitch:0.03, mx:0, my:0, warp:0.20, prism:0.95, contrast:2.04, in:0.58, out:0.26 },
-    { name:'Bio Topography', folds:3,  hue:0.30, bloom:2.40, ca:0.007, spiral:0.28, flow:0.86, pulse:0.62, shear:0.14, wave:0.30, glitch:0.08, mx:0, my:0, warp:0.44, prism:0.68, contrast:1.96, in:0.54, out:0.24 },
-    { name:'Prism Grid',    folds:2,  hue:0.63, bloom:1.55, ca:0.010, spiral:0.86, flow:0.14, pulse:0.16, shear:0.96, wave:0.18, glitch:0.62, mx:1, my:1, warp:0.26, prism:0.88, contrast:2.32, in:0.60, out:0.30 },
-    { name:'Pulse Heart',   folds:5,  hue:0.95, bloom:2.95, ca:0.010, spiral:0.20, flow:0.24, pulse:1.00, shear:0.08, wave:0.32, glitch:0.05, mx:0, my:0, warp:0.48, prism:0.72, contrast:2.16, in:0.57, out:0.27 },
-    { name:'Symmetry City', folds:0,  hue:0.58, bloom:1.25, ca:0.005, spiral:0.16, flow:0.10, pulse:0.18, shear:0.92, wave:0.22, glitch:0.58, mx:1, my:1, warp:0.22, prism:0.78, contrast:2.28, in:0.61, out:0.30 },
-    { name:'LSD Aurora',    folds:15, hue:0.09, bloom:2.78, ca:0.011, spiral:0.74, flow:0.52, pulse:0.42, shear:0.28, wave:0.40, glitch:0.26, mx:0, my:0, warp:0.60, prism:0.92, contrast:2.12, in:0.59, out:0.25 },
-    { name:'Crystal Mirror',folds:30, hue:0.72, bloom:2.96, ca:0.012, spiral:0.36, flow:0.16, pulse:0.44, shear:0.22, wave:0.26, glitch:0.06, mx:1, my:0, warp:0.34, prism:1.00, contrast:2.00, in:0.56, out:0.24 },
-    { name:'Radial Wave',   folds:1,  hue:0.42, bloom:1.82, ca:0.007, spiral:0.24, flow:0.66, pulse:0.30, shear:0.38, wave:0.92, glitch:0.34, mx:1, my:0, warp:0.68, prism:0.70, contrast:2.20, in:0.55, out:0.24 },
-    { name:'Axis Spiral',   folds:10, hue:0.18, bloom:2.32, ca:0.008, spiral:1.12, flow:0.28, pulse:0.36, shear:0.48, wave:0.26, glitch:0.30, mx:1, my:0, warp:0.40, prism:0.84, contrast:2.12, in:0.58, out:0.26 },
-    { name:'Scan Luxe',     folds:0,  hue:0.02, bloom:1.92, ca:0.012, spiral:0.22, flow:0.38, pulse:0.66, shear:0.30, wave:0.16, glitch:0.82, mx:0, my:0, warp:0.56, prism:0.76, contrast:2.36, in:0.62, out:0.30 },
-    { name:'Helix Bloom',   folds:13, hue:0.88, bloom:2.62, ca:0.009, spiral:0.76, flow:0.34, pulse:0.58, shear:0.16, wave:0.44, glitch:0.10, mx:0, my:0, warp:0.64, prism:0.90, contrast:2.02, in:0.57, out:0.25 },
+    { name:'Contour Prime', folds:7,  hue:0.01, bloom:2.40, ca:0.0046, spiral:0.02, flow:0.92, pulse:0.16, shear:0.08, wave:0.32, glitch:0.04, mx:0, my:0, warp:0.32, prism:0.76, bio:0.30, rot:0.00, contrast:2.20, in:0.90, out:0.60 },
+    { name:'Glass Mandala', folds:28, hue:0.54, bloom:2.90, ca:0.0058, spiral:0.03, flow:0.18, pulse:0.26, shear:0.12, wave:0.14, glitch:0.05, mx:0, my:0, warp:0.26, prism:1.02, bio:0.34, rot:0.24, contrast:2.18, in:0.90, out:0.58 },
+    { name:'Bio Topography', folds:4, hue:0.30, bloom:2.55, ca:0.0044, spiral:0.04, flow:0.82, pulse:0.66, shear:0.16, wave:0.34, glitch:0.08, mx:0, my:0, warp:0.46, prism:0.74, bio:0.92, rot:-0.10, contrast:2.06, in:0.90, out:0.58 },
+    { name:'Prism Matrix',  folds:3,  hue:0.63, bloom:1.74, ca:0.0052, spiral:0.02, flow:0.22, pulse:0.20, shear:1.00, wave:0.26, glitch:0.52, mx:1, my:1, warp:0.30, prism:0.94, bio:0.24, rot:0.30, contrast:2.42, in:0.92, out:0.62 },
+    { name:'Pulse Heart',   folds:6,  hue:0.95, bloom:3.12, ca:0.0054, spiral:0.03, flow:0.30, pulse:1.00, shear:0.12, wave:0.36, glitch:0.06, mx:0, my:0, warp:0.54, prism:0.78, bio:0.64, rot:-0.06, contrast:2.30, in:0.90, out:0.58 },
+    { name:'Symmetry City', folds:0,  hue:0.58, bloom:1.38, ca:0.0034, spiral:0.01, flow:0.14, pulse:0.18, shear:0.96, wave:0.24, glitch:0.50, mx:1, my:1, warp:0.24, prism:0.82, bio:0.16, rot:0.34, contrast:2.40, in:0.92, out:0.64 },
+    { name:'LSD Couture',   folds:17, hue:0.09, bloom:2.96, ca:0.0061, spiral:0.07, flow:0.56, pulse:0.48, shear:0.30, wave:0.46, glitch:0.28, mx:0, my:0, warp:0.66, prism:1.04, bio:0.72, rot:-0.20, contrast:2.22, in:0.90, out:0.58 },
+    { name:'Crystal Mirror',folds:32, hue:0.72, bloom:3.04, ca:0.0062, spiral:0.02, flow:0.20, pulse:0.42, shear:0.24, wave:0.28, glitch:0.08, mx:1, my:0, warp:0.38, prism:1.06, bio:0.38, rot:0.26, contrast:2.14, in:0.90, out:0.58 },
+    { name:'Radial Matrix', folds:2,  hue:0.42, bloom:1.98, ca:0.0042, spiral:0.03, flow:0.70, pulse:0.34, shear:0.46, wave:0.96, glitch:0.30, mx:1, my:0, warp:0.72, prism:0.74, bio:0.54, rot:-0.22, contrast:2.32, in:0.90, out:0.58 },
+    { name:'Axis Lattice',  folds:11, hue:0.18, bloom:2.48, ca:0.0048, spiral:0.05, flow:0.34, pulse:0.40, shear:0.56, wave:0.30, glitch:0.24, mx:1, my:0, warp:0.44, prism:0.88, bio:0.34, rot:0.40, contrast:2.26, in:0.92, out:0.60 },
+    { name:'Scan Luxe',     folds:0,  hue:0.02, bloom:2.04, ca:0.0064, spiral:0.01, flow:0.42, pulse:0.72, shear:0.34, wave:0.20, glitch:0.78, mx:0, my:0, warp:0.60, prism:0.82, bio:0.30, rot:-0.30, contrast:2.48, in:0.94, out:0.64 },
+    { name:'Helix Tissue',  folds:14, hue:0.88, bloom:2.78, ca:0.0051, spiral:0.06, flow:0.38, pulse:0.62, shear:0.20, wave:0.52, glitch:0.12, mx:0, my:0, warp:0.68, prism:0.96, bio:0.80, rot:0.16, contrast:2.12, in:0.90, out:0.58 },
   ];
   let activeProfile = KEY_PROFILES[0];
   // Head tracking state
@@ -1213,9 +1459,9 @@ import { initMidiPlayer } from './midi-player.js';
   function createGestureBar() {
     if (gestureBarEl && document.body.contains(gestureBarEl)) return;
     gestureBarEl = document.createElement('div');
-    gestureBarEl.style.cssText = 'position:fixed;top:38px;left:50%;transform:translateX(-50%);width:160px;height:6px;z-index:1000;pointer-events:none;background:rgba(0,0,0,0.35);border-radius:3px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);opacity:0;transition:opacity 0.5s';
+    gestureBarEl.style.cssText = 'position:fixed;top:38px;left:50%;transform:translateX(-50%);width:160px;height:6px;z-index:1000;pointer-events:none;background:rgba(0,0,0,0.35);border-radius:0;overflow:hidden;border:1px solid rgba(255,255,255,0.08);opacity:0;transition:opacity 0.5s';
     gestureFillEl = document.createElement('div');
-    gestureFillEl.style.cssText = 'position:absolute;left:0;top:0;height:100%;width:50%;background:linear-gradient(90deg,rgba(120,80,255,0.5),rgba(200,120,255,0.6));border-radius:2px;transition:width 0.08s ease-out';
+    gestureFillEl.style.cssText = 'position:absolute;left:0;top:0;height:100%;width:50%;background:linear-gradient(90deg,rgba(120,80,255,0.5),rgba(200,120,255,0.6));border-radius:0;transition:width 0.08s ease-out';
     gestureBarEl.appendChild(gestureFillEl);
     const tick = document.createElement('div');
     tick.style.cssText = 'position:absolute;left:50%;top:-2px;width:1px;height:10px;background:rgba(255,255,255,0.25);transform:translateX(-50%)';
@@ -1325,10 +1571,10 @@ import { initMidiPlayer } from './midi-player.js';
   // --- Webcam head tracking (robust multi-strategy) ---
   function createHeadBar() {
     headBarEl = document.createElement('div');
-    headBarEl.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);width:140px;height:4px;z-index:1000;pointer-events:none;background:rgba(255,255,255,0.08);border-radius:2px;overflow:visible;opacity:0;transition:opacity 0.5s';
+    headBarEl.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);width:140px;height:4px;z-index:1000;pointer-events:none;background:rgba(255,255,255,0.08);border-radius:0;overflow:visible;opacity:0;transition:opacity 0.5s';
     // Thin track line with subtle gradient
     const track = document.createElement('div');
-    track.style.cssText = 'position:absolute;inset:0;border-radius:2px;background:linear-gradient(90deg,rgba(255,100,100,0.15),rgba(255,255,255,0.1) 50%,rgba(100,220,255,0.15))';
+    track.style.cssText = 'position:absolute;inset:0;border-radius:0;background:linear-gradient(90deg,rgba(255,100,100,0.15),rgba(255,255,255,0.1) 50%,rgba(100,220,255,0.15))';
     headBarEl.appendChild(track);
     // Center tick
     const tick = document.createElement('div');
@@ -1336,7 +1582,7 @@ import { initMidiPlayer } from './midi-player.js';
     headBarEl.appendChild(tick);
     // Moving dot — small, glowing
     headDotEl = document.createElement('div');
-    headDotEl.style.cssText = 'position:absolute;width:8px;height:8px;border-radius:50%;background:#fff;box-shadow:0 0 8px 2px rgba(255,255,255,0.6);top:50%;left:50%;transform:translate(-50%,-50%);transition:left 0.04s linear,background 0.15s,box-shadow 0.15s';
+    headDotEl.style.cssText = 'position:absolute;width:8px;height:8px;border-radius:0;background:#fff;box-shadow:0 0 8px 2px rgba(255,255,255,0.6);top:50%;left:50%;transform:translate(-50%,-50%);transition:left 0.04s linear,background 0.15s,box-shadow 0.15s';
     headBarEl.appendChild(headDotEl);
     // Label — tiny, just below bar
     headLabelEl = document.createElement('div');
@@ -1384,7 +1630,7 @@ import { initMidiPlayer } from './midi-player.js';
       headVideo.srcObject = stream;
       headVideo.setAttribute('playsinline', '');
       headVideo.setAttribute('muted', '');
-      headVideo.style.cssText = 'position:fixed;bottom:8px;right:8px;width:120px;height:90px;opacity:0.3;z-index:999;border-radius:8px;pointer-events:none;transform:scaleX(-1)';
+      headVideo.style.cssText = 'position:fixed;bottom:8px;right:8px;width:120px;height:90px;opacity:0.3;z-index:999;border-radius:0;pointer-events:none;transform:scaleX(-1)';
       document.body.appendChild(headVideo);
       await headVideo.play();
       // Wait for video to actually produce frames
@@ -1607,86 +1853,171 @@ import { initMidiPlayer } from './midi-player.js';
   let reverbNode = null;
   let chorusDelay1 = null, chorusDelay2 = null;
   let compressor = null;
-  let drumGain = null; // dry only: no reverb, no delay (drums direct)
+  let limiter = null;
+  let mixAutoGain = null;
+  let outputBusGain = null;
+  let drumGain = null; // drums route into the same premium bus for timbre consistency
+  let leadDriveCurve = null;
   let chordCount = 0; // how many notes active simultaneously
 
   function initAudio() {
     if (audioCtx) return;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    // Synth chain: voices → compressor → dry + chorus + reverb (reduced echo)
+    // Unified premium bus: poly gain staging -> tone EQ -> soft color -> glue comp -> limiter.
     compressor = audioCtx.createDynamicsCompressor();
-    compressor.threshold.value = -16;
-    compressor.knee.value = 10;
-    compressor.ratio.value = 3.5;
-    compressor.attack.value = 0.002;
-    compressor.release.value = 0.12;
+    compressor.threshold.value = -21;
+    compressor.knee.value = 12;
+    compressor.ratio.value = 2.4;
+    compressor.attack.value = 0.006;
+    compressor.release.value = 0.18;
+
+    limiter = audioCtx.createDynamicsCompressor();
+    limiter.threshold.value = -7.2;
+    limiter.knee.value = 0.2;
+    limiter.ratio.value = 28;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.16;
 
     masterGain = audioCtx.createGain();
     masterGain.gain.value = masterVolume;
+    drumGain = audioCtx.createGain();
+    drumGain.gain.value = masterVolume;
+    mixAutoGain = audioCtx.createGain();
+    mixAutoGain.gain.value = 1.0;
+
+    const toneHighpass = audioCtx.createBiquadFilter();
+    toneHighpass.type = 'highpass';
+    toneHighpass.frequency.value = 34;
+    toneHighpass.Q.value = 0.65;
+
+    const toneLowShelf = audioCtx.createBiquadFilter();
+    toneLowShelf.type = 'lowshelf';
+    toneLowShelf.frequency.value = 170;
+    toneLowShelf.gain.value = -1.4;
+
     const color = audioCtx.createWaveShaper();
     const curve = new Float32Array(1024);
     for (let i = 0; i < curve.length; i++) {
       const x = (i / (curve.length - 1)) * 2 - 1;
-      curve[i] = Math.tanh(x * 1.55) * 0.9;
+      curve[i] = Math.tanh(x * 0.9) * 0.96;
     }
     color.curve = curve;
-    color.oversample = '2x';
-    masterGain.connect(color);
-    color.connect(compressor);
+    color.oversample = '4x';
+    leadDriveCurve = new Float32Array(512);
+    for (let i = 0; i < leadDriveCurve.length; i++) {
+      const x = (i / (leadDriveCurve.length - 1)) * 2 - 1;
+      leadDriveCurve[i] = Math.tanh(x * 1.5) * 0.98;
+    }
 
-    drumGain = audioCtx.createGain();
-    drumGain.gain.value = masterVolume;
-    // Route drums through the same color/compressor path for unified sonic character.
-    drumGain.connect(color);
+    const tonePresence = audioCtx.createBiquadFilter();
+    tonePresence.type = 'peaking';
+    tonePresence.frequency.value = 2350;
+    tonePresence.Q.value = 1.02;
+    tonePresence.gain.value = 0.9;
 
-    // Stereo widener: two delays panned L/R (synth only, not drums)
+    const toneHarshCut = audioCtx.createBiquadFilter();
+    toneHarshCut.type = 'peaking';
+    toneHarshCut.frequency.value = 3350;
+    toneHarshCut.Q.value = 1.35;
+    toneHarshCut.gain.value = -1.45;
+
+    const toneAir = audioCtx.createBiquadFilter();
+    toneAir.type = 'highshelf';
+    toneAir.frequency.value = 8600;
+    toneAir.gain.value = 0.8;
+
+    const toneSilk = audioCtx.createBiquadFilter();
+    toneSilk.type = 'highshelf';
+    toneSilk.frequency.value = 11500;
+    toneSilk.gain.value = 0.35;
+
+    outputBusGain = audioCtx.createGain();
+    outputBusGain.gain.value = 0.84;
+
+    masterGain.connect(mixAutoGain);
+    drumGain.connect(mixAutoGain);
+    mixAutoGain.connect(toneHighpass);
+    toneHighpass.connect(toneLowShelf);
+    toneLowShelf.connect(color);
+    color.connect(tonePresence);
+    tonePresence.connect(toneHarshCut);
+    toneHarshCut.connect(toneAir);
+    toneAir.connect(toneSilk);
+    toneSilk.connect(compressor);
+    compressor.connect(limiter);
+    limiter.connect(outputBusGain);
+
+    // Stereo widener: subtle and clean.
     const merger = audioCtx.createChannelMerger(2);
     chorusDelay1 = audioCtx.createDelay(0.05);
-    chorusDelay1.delayTime.value = 0.012;
+    chorusDelay1.delayTime.value = 0.011;
     chorusDelay2 = audioCtx.createDelay(0.05);
-    chorusDelay2.delayTime.value = 0.018;
-    const chorusGainL = audioCtx.createGain(); chorusGainL.gain.value = 0.3;
-    const chorusGainR = audioCtx.createGain(); chorusGainR.gain.value = 0.3;
-    compressor.connect(chorusDelay1);
-    compressor.connect(chorusDelay2);
+    chorusDelay2.delayTime.value = 0.016;
+    const chorusSend = audioCtx.createGain(); chorusSend.gain.value = 0.08;
+    const chorusGainL = audioCtx.createGain(); chorusGainL.gain.value = 0.06;
+    const chorusGainR = audioCtx.createGain(); chorusGainR.gain.value = 0.06;
+    outputBusGain.connect(chorusSend);
+    chorusSend.connect(chorusDelay1);
+    chorusSend.connect(chorusDelay2);
     chorusDelay1.connect(chorusGainL);
     chorusDelay2.connect(chorusGainR);
     chorusGainL.connect(merger, 0, 0);
     chorusGainR.connect(merger, 0, 1);
 
-    // LFO modulates chorus delay for shimmer
+    // LFO modulates chorus delay, restrained to avoid pitch wobble.
     const chorusLfo = audioCtx.createOscillator();
-    chorusLfo.frequency.value = 0.8;
+    chorusLfo.frequency.value = 0.62;
     const chorusLfoGain = audioCtx.createGain();
-    chorusLfoGain.gain.value = 0.003;
+    chorusLfoGain.gain.value = 0.0012;
     chorusLfo.connect(chorusLfoGain);
     chorusLfoGain.connect(chorusDelay1.delayTime);
     chorusLfoGain.connect(chorusDelay2.delayTime);
     chorusLfo.start();
 
-    // Convolution-like reverb (feedback delay network)
+    // Reverb network: shorter, cleaner tail.
     const rev1 = audioCtx.createDelay(1); rev1.delayTime.value = 0.13;
-    const rev2 = audioCtx.createDelay(1); rev2.delayTime.value = 0.19;
-    const rev3 = audioCtx.createDelay(1); rev3.delayTime.value = 0.27;
-    const revFb1 = audioCtx.createGain(); revFb1.gain.value = 0.28;
-    const revFb2 = audioCtx.createGain(); revFb2.gain.value = 0.26;
-    const revFb3 = audioCtx.createGain(); revFb3.gain.value = 0.24;
+    const rev2 = audioCtx.createDelay(1); rev2.delayTime.value = 0.18;
+    const rev3 = audioCtx.createDelay(1); rev3.delayTime.value = 0.25;
+    const revFb1 = audioCtx.createGain(); revFb1.gain.value = 0.22;
+    const revFb2 = audioCtx.createGain(); revFb2.gain.value = 0.2;
+    const revFb3 = audioCtx.createGain(); revFb3.gain.value = 0.18;
     rev1.connect(revFb1); revFb1.connect(rev1); // feedback loops
     rev2.connect(revFb2); revFb2.connect(rev2);
     rev3.connect(revFb3); revFb3.connect(rev3);
     const revFilter = audioCtx.createBiquadFilter();
-    revFilter.type = 'lowpass'; revFilter.frequency.value = 4000;
-    const revGain = audioCtx.createGain(); revGain.gain.value = 0.06;
-    compressor.connect(rev1); compressor.connect(rev2); compressor.connect(rev3);
+    revFilter.type = 'lowpass'; revFilter.frequency.value = 5200;
+    const revGain = audioCtx.createGain(); revGain.gain.value = 0.014;
+    outputBusGain.connect(rev1); outputBusGain.connect(rev2); outputBusGain.connect(rev3);
     rev1.connect(revFilter); rev2.connect(revFilter); rev3.connect(revFilter);
     revFilter.connect(revGain);
+    reverbNode = revGain;
 
-    // Mix to destination (no echo / ping-pong delay)
-    const dryGain = audioCtx.createGain(); dryGain.gain.value = 0.65;
-    compressor.connect(dryGain);
+    // High-end ping-pong shimmer: filtered echoes for richer sustain without muddy tails.
+    const pingSend = audioCtx.createGain(); pingSend.gain.value = 0.07;
+    const pingL = audioCtx.createDelay(0.8); pingL.delayTime.value = 0.19;
+    const pingR = audioCtx.createDelay(0.8); pingR.delayTime.value = 0.27;
+    const pingFbL = audioCtx.createGain(); pingFbL.gain.value = 0.19;
+    const pingFbR = audioCtx.createGain(); pingFbR.gain.value = 0.17;
+    const pingHP = audioCtx.createBiquadFilter(); pingHP.type = 'highpass'; pingHP.frequency.value = 980;
+    const pingLP = audioCtx.createBiquadFilter(); pingLP.type = 'lowpass'; pingLP.frequency.value = 6400;
+    const pingOut = audioCtx.createGain(); pingOut.gain.value = 0.09;
+    outputBusGain.connect(pingSend);
+    pingSend.connect(pingL);
+    pingSend.connect(pingR);
+    pingL.connect(pingFbL); pingFbL.connect(pingR);
+    pingR.connect(pingFbR); pingFbR.connect(pingL);
+    pingL.connect(pingHP);
+    pingR.connect(pingHP);
+    pingHP.connect(pingLP);
+    pingLP.connect(pingOut);
+
+    // Final mix to destination.
+    const dryGain = audioCtx.createGain(); dryGain.gain.value = 0.72;
+    outputBusGain.connect(dryGain);
     dryGain.connect(audioCtx.destination);
     merger.connect(audioCtx.destination);
     revGain.connect(audioCtx.destination);
+    pingOut.connect(audioCtx.destination);
   }
 
   // --- Modern 2020s-style procedural drums (not overwhelming; sit in mix) ---
@@ -1920,146 +2251,173 @@ import { initMidiPlayer } from './midi-player.js';
     tgtWarp = activeProfile.warp;
     tgtPrism = activeProfile.prism ?? 0.62;
     tgtContrast = activeProfile.contrast;
+    tgtBio = activeProfile.bio ?? 0.35;
+    tgtProfileRoll = activeProfile.rot ?? 0;
     burstRingTime = performance.now() * 0.001;
   }
 
   function createSynthVoice(midiNote, opts) {
+    opts = opts || {};
     const midi = opts.snapPitch === false
       ? Math.max(0, Math.min(127, Math.round(midiNote)))
       : snapToNatural(midiNote);
     const velocity = opts.velocity != null ? opts.velocity : 0.8;
+    const velNorm = clamp01(velocity);
     const fromMIDI = !!opts.fromMIDI;
     const hasScheduledDuration = opts.duration != null && opts.startTime != null;
-    const freq = midiToFreq(midi);
+    const sustained = !!opts.sustained;
+    const shortOnly = !hasScheduledDuration && !sustained;
     const now = opts.startTime != null ? opts.startTime : audioCtx.currentTime;
-    // Unified premium timbre across all keys (pitch changes only).
-    const timbreBlend = 0.38;
-    const styleLsdMix = timbreBlend;
-    const styleMuseumMix = 1 - timbreBlend;
+    const freq = midiToFreq(midi);
 
-    // Same short punch for every key (no sustain tail); MIDI playback keeps scheduled duration only
-    const shortOnly = !hasScheduledDuration;
-    const sustained = !shortOnly && !!opts.sustained;
+    const polyHintInput = opts.polyHint != null
+      ? opts.polyHint
+      : (fromMIDI ? Math.max(1, displayedMidiNotes.length) : Math.max(1, keysPressed.size));
+    const nActive = Math.max(1, Math.min(24, polyHintInput));
+    const ecoMode = fromMIDI && nActive >= 8;
+    const ultraEco = fromMIDI && nActive >= 12;
+    const harmonyMode = getHarmonyMode();
+    const harmonyPolyLimit = fromMIDI ? 5 : 7;
+    const harmonyEnabled = harmonyMode !== 'off' && nActive >= 2 && nActive <= harmonyPolyLimit;
+    const harmonySemitone = harmonyEnabled ? getHarmonySemitone(harmonyMode, midi) : 0;
+    const harmonyRatio = harmonyEnabled ? Math.pow(2, harmonySemitone / 12) : 1.0;
 
-    // Unified dual-layer premium synth:
-    // analog body + restrained spectral shimmer (fixed blend for coherent timbre).
-    const det = -1.6;
-    const museumA = audioCtx.createOscillator();
-    museumA.type = 'sawtooth';
-    museumA.frequency.value = freq;
-    museumA.detune.value = -7 + det;
-    const museumB = audioCtx.createOscillator();
-    museumB.type = 'triangle';
-    museumB.frequency.value = freq;
-    museumB.detune.value = 8 + det;
-    const museumSub = audioCtx.createOscillator();
-    museumSub.type = 'sine';
-    museumSub.frequency.value = freq * 0.5;
-    const museumSubGain = audioCtx.createGain();
-    museumSubGain.gain.value = 0.24;
-    museumSub.connect(museumSubGain);
+    const pitchNorm = clamp01((midi - 36) / 60);
+    const velStable = 0.62 + 0.38 * Math.pow(velNorm, 0.82);
+    const polyTrim = nActive > 1 ? 1 / (1 + Math.pow(nActive - 1, 1.08) * 0.16) : 1;
+    const sourceTrim = fromMIDI ? 0.96 : 1.0;
+    let peakGain = 0.31 * velStable * polyTrim * sourceTrim;
+    if (harmonyEnabled) peakGain *= 0.95;
+    peakGain = Math.max(0.07, Math.min(0.38, peakGain));
 
-    const lsdCarrier = audioCtx.createOscillator();
-    lsdCarrier.type = 'square';
-    lsdCarrier.frequency.value = freq * 1.01;
-    const lsdUpper = audioCtx.createOscillator();
-    lsdUpper.type = 'triangle';
-    lsdUpper.frequency.value = freq * 2.0;
-    const lsdUpperGain = audioCtx.createGain();
-    lsdUpperGain.gain.value = 0.14;
-    lsdUpper.connect(lsdUpperGain);
-    const fm = audioCtx.createOscillator();
-    fm.type = 'sine';
-    fm.frequency.value = 3.6;
-    const fmGain = audioCtx.createGain();
-    fmGain.gain.value = 16 + styleLsdMix * 12;
-    fm.connect(fmGain);
-    fmGain.connect(lsdCarrier.detune);
+    const oscA = audioCtx.createOscillator();
+    oscA.type = freq > 1300 ? 'triangle' : 'sawtooth';
+    oscA.frequency.value = freq;
+    oscA.detune.value = -2.2;
+    const oscAGain = audioCtx.createGain();
+    oscAGain.gain.value = 0.66;
+    oscA.connect(oscAGain);
 
-    const museumBus = audioCtx.createGain();
-    museumBus.gain.value = styleMuseumMix * (0.86 + 0.16 * (1 - styleLsdMix));
-    const lsdBus = audioCtx.createGain();
-    lsdBus.gain.value = styleLsdMix * (0.68 + 0.24 * styleLsdMix);
+    const oscB = ultraEco ? null : audioCtx.createOscillator();
+    const oscBGain = ultraEco ? null : audioCtx.createGain();
+    if (oscB && oscBGain) {
+      oscB.type = ecoMode ? 'triangle' : 'sawtooth';
+      oscB.frequency.value = freq;
+      oscB.detune.value = 2.4;
+      oscBGain.gain.value = ecoMode ? 0.2 : 0.34;
+      oscB.connect(oscBGain);
+    }
 
-    const museumFilter = audioCtx.createBiquadFilter();
-    museumFilter.type = 'lowpass';
-    museumFilter.frequency.setValueAtTime(Math.min(8200, Math.max(900, freq * 6.0)), now);
-    museumFilter.frequency.exponentialRampToValueAtTime(Math.min(4200, Math.max(700, freq * 3.1)), now + 0.04);
-    museumFilter.Q.value = 2.0 + styleMuseumMix * 0.8;
+    const subOsc = ultraEco ? null : audioCtx.createOscillator();
+    const subGain = ultraEco ? null : audioCtx.createGain();
+    if (subOsc && subGain) {
+      subOsc.type = 'sine';
+      subOsc.frequency.value = freq * 0.5;
+      subGain.gain.value = Math.max(0.02, 0.1 - pitchNorm * 0.04);
+      subOsc.connect(subGain);
+    }
 
-    const lsdFilter = audioCtx.createBiquadFilter();
-    lsdFilter.type = 'bandpass';
-    lsdFilter.frequency.setValueAtTime(Math.min(3800, Math.max(500, freq * 2.3 + styleLsdMix * 180)), now);
-    lsdFilter.frequency.exponentialRampToValueAtTime(Math.min(5200, Math.max(760, freq * 3.0 + styleLsdMix * 220)), now + 0.06);
-    lsdFilter.Q.value = 2.8 + styleLsdMix * 3.2;
+    const harmonyOsc = harmonyEnabled ? audioCtx.createOscillator() : null;
+    const harmonyGain = harmonyEnabled ? audioCtx.createGain() : null;
+    if (harmonyOsc && harmonyGain) {
+      harmonyOsc.type = ecoMode ? 'triangle' : 'sawtooth';
+      harmonyOsc.frequency.value = freq * harmonyRatio;
+      harmonyOsc.detune.value = harmonyMode === 'ninth' ? 0.6 : 1.2;
+      const harmonyBase = harmonyMode === 'ninth' ? 0.04 : 0.05;
+      harmonyGain.gain.value = harmonyBase / Math.sqrt(Math.max(1, nActive));
+      harmonyOsc.connect(harmonyGain);
+    }
 
-    const nActive = fromMIDI ? 1 : keysPressed.size;
-    const chordVel = velocity * (nActive > 1 ? 0.72 / Math.sqrt(nActive) : 1);
+    const mixBus = audioCtx.createGain();
+    mixBus.gain.value = 1.0;
+    oscAGain.connect(mixBus);
+    if (oscBGain) oscBGain.connect(mixBus);
+    if (subGain) subGain.connect(mixBus);
+    if (harmonyGain) harmonyGain.connect(mixBus);
+
+    const voiceLowpass = audioCtx.createBiquadFilter();
+    voiceLowpass.type = 'lowpass';
+    const brightness = clamp01(0.42 + velNorm * 0.34 + (1 - pitchNorm) * 0.18 - Math.min(0.16, (nActive - 1) * 0.02));
+    const lpStart = Math.min(9800, Math.max(1600, 1800 + brightness * 4200 + freq * 0.52));
+    const lpSustain = Math.min(6800, Math.max(1200, 1300 + brightness * 2400 + freq * 0.26));
+    voiceLowpass.frequency.setValueAtTime(lpStart, now);
+    voiceLowpass.frequency.exponentialRampToValueAtTime(lpSustain, now + 0.09);
+    voiceLowpass.Q.value = 0.8 + brightness * 0.22;
+
+    const voiceHighpass = audioCtx.createBiquadFilter();
+    voiceHighpass.type = 'highpass';
+    voiceHighpass.frequency.value = Math.max(24, Math.min(110, freq * 0.09));
+    voiceHighpass.Q.value = 0.72;
+
+    const voiceDrive = audioCtx.createWaveShaper();
+    if (!leadDriveCurve) {
+      leadDriveCurve = new Float32Array(512);
+      for (let i = 0; i < leadDriveCurve.length; i++) {
+        const x = (i / (leadDriveCurve.length - 1)) * 2 - 1;
+        leadDriveCurve[i] = Math.tanh(x * 1.5) * 0.98;
+      }
+    }
+    voiceDrive.curve = leadDriveCurve;
+    voiceDrive.oversample = '2x';
+
     const envGain = audioCtx.createGain();
     envGain.gain.value = 0;
-    const a = 0.001;
-    const d = shortOnly ? 0.028 : (sustained ? 0.1 : 0.028);
-    const s = shortOnly ? 0.06 : (sustained ? 0.5 : 0.06);
-    const r = shortOnly ? 0.14 : (sustained ? 0.35 : 0.14);
-    const releaseEnd = now + a + d + r;
+
+    mixBus.connect(voiceLowpass);
+    voiceLowpass.connect(voiceHighpass);
+    voiceHighpass.connect(voiceDrive);
+    voiceDrive.connect(envGain);
+
+    let voiceOut = envGain;
+    if (typeof audioCtx.createStereoPanner === 'function') {
+      const voicePan = audioCtx.createStereoPanner();
+      voicePan.pan.value = Math.max(-0.22, Math.min(0.22, (midi - 66) / 34));
+      envGain.connect(voicePan);
+      voiceOut = voicePan;
+    }
+    voiceOut.connect(masterGain);
+
+    const attack = shortOnly ? 0.0035 : (sustained ? 0.007 : 0.005);
+    const decay = shortOnly ? 0.07 : (sustained ? 0.11 : 0.085);
+    const sustainAmt = shortOnly ? 0.18 : (sustained ? 0.46 : 0.28);
+    const release = shortOnly ? 0.16 : (sustained ? 0.24 : 0.2);
+    const releaseEnd = now + attack + decay + release;
     envGain.gain.setValueAtTime(0, now);
-    envGain.gain.linearRampToValueAtTime(chordVel, now + a);
-    envGain.gain.linearRampToValueAtTime(chordVel * s, now + a + d);
+    envGain.gain.linearRampToValueAtTime(peakGain, now + attack);
+    envGain.gain.linearRampToValueAtTime(peakGain * sustainAmt, now + attack + decay);
     if (hasScheduledDuration) {
       const endTime = now + Math.max(0.02, opts.duration);
-      envGain.gain.setValueAtTime(chordVel * s, endTime);
-      envGain.gain.linearRampToValueAtTime(0, endTime + r);
+      envGain.gain.setValueAtTime(peakGain * sustainAmt, endTime);
+      envGain.gain.linearRampToValueAtTime(0, endTime + release);
+    } else if (sustained) {
+      envGain.gain.setValueAtTime(peakGain * sustainAmt, now + attack + decay);
     } else {
       envGain.gain.linearRampToValueAtTime(0, releaseEnd);
     }
 
-    if (sustained && !hasScheduledDuration) {
-      const vib = audioCtx.createOscillator(); vib.frequency.value = 4.0;
-      const vibGain = audioCtx.createGain(); vibGain.gain.value = 2.2;
-      vib.connect(vibGain); vibGain.connect(museumA.frequency); vibGain.connect(museumB.frequency);
-      vib.start(now + 0.12);
-      const filterLfo = audioCtx.createOscillator(); filterLfo.frequency.value = 1.4;
-      const filterLfoGain = audioCtx.createGain(); filterLfoGain.gain.value = 280 + styleLsdMix * 320;
-      filterLfo.connect(filterLfoGain);
-      filterLfoGain.connect(museumFilter.frequency);
-      filterLfoGain.connect(lsdFilter.frequency);
-      filterLfo.start(now);
-    }
+    const oscNodes = [oscA];
+    if (oscB) oscNodes.push(oscB);
+    if (subOsc) oscNodes.push(subOsc);
+    if (harmonyOsc) oscNodes.push(harmonyOsc);
+    for (let i = 0; i < oscNodes.length; i++) oscNodes[i].start(now);
 
-    museumA.connect(museumFilter);
-    museumB.connect(museumFilter);
-    museumSubGain.connect(museumFilter);
-    museumFilter.connect(museumBus);
-
-    lsdCarrier.connect(lsdFilter);
-    lsdUpperGain.connect(lsdFilter);
-    lsdFilter.connect(lsdBus);
-
-    museumBus.connect(envGain);
-    lsdBus.connect(envGain);
-    envGain.connect(masterGain);
-
-    const stopTime = hasScheduledDuration ? now + Math.max(0.02, opts.duration) + r : releaseEnd;
-    museumA.start(now); museumB.start(now); museumSub.start(now);
-    lsdCarrier.start(now); lsdUpper.start(now); fm.start(now);
-    if (hasScheduledDuration) {
-      museumA.stop(stopTime); museumB.stop(stopTime); museumSub.stop(stopTime);
-      lsdCarrier.stop(stopTime); lsdUpper.stop(stopTime); fm.stop(stopTime);
+    const scheduledStop = hasScheduledDuration
+      ? now + Math.max(0.02, opts.duration) + release + 0.03
+      : releaseEnd + 0.03;
+    if (hasScheduledDuration || shortOnly) {
+      for (let i = 0; i < oscNodes.length; i++) {
+        try { oscNodes[i].stop(scheduledStop); } catch (_) {}
+      }
     }
 
     function stop() {
       const t = audioCtx.currentTime;
       envGain.gain.cancelScheduledValues(t);
       envGain.gain.setValueAtTime(envGain.gain.value, t);
-      envGain.gain.linearRampToValueAtTime(0, t + 0.01);
-      try {
-        museumA.stop(t); museumB.stop(t); museumSub.stop(t);
-        lsdCarrier.stop(t); lsdUpper.stop(t); fm.stop(t);
-      } catch (_) {}
-    }
-    if (shortOnly) {
-      museumA.stop(stopTime); museumB.stop(stopTime); museumSub.stop(stopTime);
-      lsdCarrier.stop(stopTime); lsdUpper.stop(stopTime); fm.stop(stopTime);
+      envGain.gain.setTargetAtTime(0, t, 0.012);
+      for (let i = 0; i < oscNodes.length; i++) {
+        try { oscNodes[i].stop(t + 0.05); } catch (_) {}
+      }
     }
     return { stop };
   }
@@ -2097,6 +2455,8 @@ import { initMidiPlayer } from './midi-player.js';
     tgtWarp = activeProfile.warp;
     tgtPrism = activeProfile.prism ?? 0.62;
     tgtContrast = activeProfile.contrast;
+    tgtBio = activeProfile.bio ?? 0.35;
+    tgtProfileRoll = activeProfile.rot ?? 0;
     burstRingTime = performance.now() * 0.001;
   }
 
@@ -2125,6 +2485,8 @@ import { initMidiPlayer } from './midi-player.js';
     tgtWarp = activeProfile.warp;
     tgtPrism = activeProfile.prism ?? 0.62;
     tgtContrast = activeProfile.contrast;
+    tgtBio = activeProfile.bio ?? 0.35;
+    tgtProfileRoll = activeProfile.rot ?? 0;
     burstRingTime = performance.now() * 0.001;
   }
 
@@ -2145,7 +2507,7 @@ import { initMidiPlayer } from './midi-player.js';
   function createHud() {
     hudEl = document.createElement('div');
     hudEl.setAttribute('aria-live', 'polite');
-    hudEl.style.cssText = 'position:fixed;bottom:12px;left:12px;z-index:1000;pointer-events:none;font:10px/1.5 "SF Pro Text", "Segoe UI", system-ui, sans-serif;color:rgba(255,255,255,0.52);letter-spacing:0.04em;background:rgba(0,0,0,0.2);padding:6px 10px;border-radius:6px;backdrop-filter:blur(6px)';
+    hudEl.style.cssText = 'position:fixed;bottom:12px;left:12px;z-index:1000;pointer-events:none;font:11px/1.5 "JetBrains Mono","IBM Plex Mono","SFMono-Regular","Menlo","Consolas",monospace;color:rgba(214,238,255,0.62);letter-spacing:0.04em;background:rgba(2,8,14,0.26);padding:6px 10px;border-radius:0;backdrop-filter:blur(6px)';
     document.body.appendChild(hudEl);
   }
   function updateHud() {
@@ -2155,6 +2517,10 @@ import { initMidiPlayer } from './midi-player.js';
     modes.push('[2] arp ' + (arpEnabled ? 'ON' : 'off'));
     modes.push('[3] cam ' + (gyroEnabled ? 'ON' : 'off'));
     modes.push('[4] ambient ' + (ambientMode ? 'ON' : 'off'));
+    modes.push('[6] harm ' + HARMONY_MODE_LABEL[getHarmonyMode()].toLowerCase());
+    modes.push('[7] px ' + PIXEL_MODE_LABELS[pixelModeIdx]);
+    modes.push('[8] analog ' + ANALOG_MODE_LABELS[analogModeIdx]);
+    modes.push('[9] text ' + TEXT_MODE_LABELS[textModeIdx]);
     if (sustainPedalHeld) modes.push('sustain');
     if (performance.now() * 0.001 < visualFreezeUntil) modes.push('freeze');
     modes.push('vol ' + (masterVolume * 100 | 0) + '%');
@@ -2179,9 +2545,13 @@ import { initMidiPlayer } from './midi-player.js';
           <span style="color:rgba(255,255,255,0.5)">Q–P [ ]</span><span>中/高八度</span>
           <span style="color:rgba(255,255,255,0.5)">Shift + 键</span><span>高八度</span>
           <span style="color:rgba(255,255,255,0.5)">Space</span><span>延音踏板（按住）</span>
-          <span style="color:rgba(255,255,255,0.5)">1–4</span><span>麦克风 / 琶音 / 摄像头 / 环境</span>
-          <span style="color:rgba(255,255,255,0.5)">5</span><span>视觉冻结 2 秒</span>
-          <span style="color:rgba(255,255,255,0.5)">− =</span><span>主音量减 / 加</span>
+	          <span style="color:rgba(255,255,255,0.5)">1–4</span><span>麦克风 / 琶音 / 摄像头 / 环境</span>
+	          <span style="color:rgba(255,255,255,0.5)">5</span><span>视觉冻结 2 秒</span>
+	          <span style="color:rgba(255,255,255,0.5)">6</span><span>智能和声（OFF / AUTO3 / MAJ3 / MIN3 / 5TH / 9TH）</span>
+	          <span style="color:rgba(255,255,255,0.5)">7</span><span>像素层级（soft / dense / hard）</span>
+	          <span style="color:rgba(255,255,255,0.5)">8</span><span>模拟屏（clean / crt / vhs）</span>
+	          <span style="color:rgba(255,255,255,0.5)">9</span><span>文字引擎（clean / glitch / overclock）</span>
+	          <span style="color:rgba(255,255,255,0.5)">− =</span><span>主音量减 / 加</span>
           <span style="color:rgba(255,255,255,0.5)">Esc</span><span>停止延音 + 重置缩放</span>
           <span style="color:rgba(255,255,255,0.5)">?</span><span>本帮助</span>
           <span style="color:rgba(255,255,255,0.5)">滚轮</span><span>缩放</span>
@@ -2298,6 +2668,27 @@ import { initMidiPlayer } from './midi-player.js';
       showModeToast('Freeze 2s');
       return;
     }
+    if (key === 'Digit6') {
+      e.preventDefault();
+      const hm = cycleHarmonyMode();
+      showModeToast('Harmony ' + HARMONY_MODE_LABEL[hm]);
+      return;
+    }
+    if (key === 'Digit7') {
+      e.preventDefault();
+      showModeToast('Pixel ' + cyclePixelMode().toUpperCase());
+      return;
+    }
+    if (key === 'Digit8') {
+      e.preventDefault();
+      showModeToast('Analog ' + cycleAnalogMode().toUpperCase());
+      return;
+    }
+    if (key === 'Digit9') {
+      e.preventDefault();
+      showModeToast('Text ' + cycleTextMode().toUpperCase());
+      return;
+    }
 
     // Master volume − =
     if (key === 'Minus') {
@@ -2381,8 +2772,10 @@ import { initMidiPlayer } from './midi-player.js';
           tgtWarp = blend.warp;
           tgtPrism = blend.prism;
           tgtContrast = blend.contrast;
+          tgtBio = blend.bio;
+          tgtProfileRoll = blend.rot;
           currentKeyHue = blend.hue;
-          activeProfile = { ...activeProfile, bloom: blend.bloom, ca: blend.ca, prism: blend.prism, in: blend.in, out: blend.out };
+          activeProfile = { ...activeProfile, bloom: blend.bloom, ca: blend.ca, prism: blend.prism, bio: blend.bio, rot: blend.rot, in: blend.in, out: blend.out };
         }
       }
     }
@@ -2407,6 +2800,7 @@ import { initMidiPlayer } from './midi-player.js';
     if (KEY_TO_NOTE[key] == null) return;
     e.preventDefault();
     keysPressed.delete(key);
+    chordCount = keysPressed.size;
     if (isSustainNote(KEY_TO_NOTE[key])) {
       const stop = sustainedVoices.get(key);
       if (stop) { stop(); sustainedVoices.delete(key); }
@@ -2418,13 +2812,13 @@ import { initMidiPlayer } from './midi-player.js';
     const hasKeys = keysPressed.size > 0;
     const hasMidi = displayedMidiNotes.length > 0;
     const targetReveal = (hasKeys || hasMidi) ? 1 : 0;
-    keyDisplayReveal = smoothApproach(keyDisplayReveal, targetReveal, 0.52, 0.36);
+    keyDisplayReveal = smoothApproach(keyDisplayReveal, targetReveal, 0.66, 0.52);
     const visible = keyDisplayReveal > 0.02;
     keyDisplayMesh.visible = visible;
     if (visible) {
-      const s = 0.96 + 0.04 * keyDisplayReveal;
+      const s = 0.97 + 0.03 * keyDisplayReveal;
       keyDisplayMesh.scale.set(s, s, 1);
-      if (keyDisplayMesh.material) keyDisplayMesh.material.opacity = 0.8 + 0.16 * keyDisplayReveal;
+      if (keyDisplayMesh.material) keyDisplayMesh.material.opacity = 0.74 + 0.14 * keyDisplayReveal;
     }
     const ctx = keyDisplayCanvas.getContext('2d');
     if (!ctx) return;
@@ -2439,48 +2833,9 @@ import { initMidiPlayer } from './midi-player.js';
     const now = performance.now() * 0.001;
     const rhythmA = 0.5 + 0.5 * Math.sin(now * 0.45);
     const rhythmB = 0.5 + 0.5 * Math.sin(now * 0.38 + 1.0);
-    const prismGlow = 0.25 + curPrism * 0.75;
-    const radius = h / 2 - 4;
-    const pad = 6;
-    const rx = radius;
-    const x0 = pad, y0 = pad, x1 = w - pad, y1 = h - pad;
-    ctx.beginPath();
-    ctx.moveTo(x0 + rx, y0);
-    ctx.lineTo(x1 - rx, y0);
-    ctx.quadraticCurveTo(x1, y0, x1, y0 + rx);
-    ctx.lineTo(x1, y1 - rx);
-    ctx.quadraticCurveTo(x1, y1, x1 - rx, y1);
-    ctx.lineTo(x0 + rx, y1);
-    ctx.quadraticCurveTo(x0, y1, x0, y1 - rx);
-    ctx.lineTo(x0, y0 + rx);
-    ctx.quadraticCurveTo(x0, y0, x0 + rx, y0);
-    ctx.closePath();
-    const bgGradient = ctx.createLinearGradient(0, y0, 0, y1);
-    bgGradient.addColorStop(0, `hsla(${hueDeg}, 24%, 10%, ${0.74 + 0.14 * keyDisplayReveal + rhythmA * 0.03})`);
-    bgGradient.addColorStop(0.46, `hsla(${(hueDeg + 10) % 360}, 18%, 7%, ${0.78 + 0.1 * keyDisplayReveal})`);
-    bgGradient.addColorStop(1, `hsla(${(hueDeg + 24) % 360}, 16%, 5%, ${0.82 + 0.09 * keyDisplayReveal})`);
-    ctx.fillStyle = bgGradient;
-    ctx.fill();
-    ctx.strokeStyle = `hsla(${hueDeg}, 26%, 56%, ${0.14 + 0.1 * keyDisplayReveal + rhythmB * 0.05})`;
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-    const rimGradient = ctx.createLinearGradient(x0, y0, x1, y1);
-    rimGradient.addColorStop(0, `hsla(${(hueDeg + 28) % 360}, 62%, 82%, ${0.16 + 0.16 * keyDisplayReveal})`);
-    rimGradient.addColorStop(1, `hsla(${(hueDeg + 330) % 360}, 62%, 78%, ${0.1 + 0.14 * keyDisplayReveal})`);
-    ctx.strokeStyle = rimGradient;
-    ctx.lineWidth = 0.9;
-    ctx.stroke();
-    ctx.shadowBlur = 14 + 16 * keyDisplayReveal * prismGlow;
-    ctx.shadowColor = `hsla(${hueDeg}, 56%, 62%, ${0.16 + 0.24 * keyDisplayReveal * prismGlow})`;
-    const glassTop = ctx.createLinearGradient(0, y0, 0, y0 + (y1 - y0) * 0.45);
-    glassTop.addColorStop(0, `hsla(${(hueDeg + 12) % 360}, 48%, 88%, ${0.1 + 0.12 * keyDisplayReveal})`);
-    glassTop.addColorStop(1, 'hsla(0, 0%, 100%, 0)');
-    ctx.fillStyle = glassTop;
-    ctx.fill();
-
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
+    const codeFont = `"JetBrains Mono","IBM Plex Mono","Fira Code","SFMono-Regular","Menlo","Consolas",monospace`;
+    const txtFx = TEXT_GLITCH_VALUES[textModeIdx];
+    ctx.imageSmoothingEnabled = false;
     const pairs = [];
     if (hasKeys) {
       keysPressed.forEach(k => {
@@ -2493,46 +2848,331 @@ import { initMidiPlayer } from './midi-player.js';
     const keyNotes = pairs.map(p => midiToNoteName(p.midi));
     const sortedMidi = hasMidi ? [...displayedMidiNotes].sort((a, b) => a - b) : [];
     const midiLabels = sortedMidi.map(m => midiToNoteName(m));
+    const ordered = collectOrderedActiveNotes();
     const letters = keyLabels.join('   ');
     const keyText = keyNotes.join(' · ');
     const midiText = midiLabels.join(' · ');
 
-    const mainText = hasKeys ? letters : midiText;
-    const mainCount = Math.max(1, hasKeys ? keyLabels.length : midiLabels.length);
-    const mainSize = Math.min(74, 34 + Math.floor(390 / mainCount));
-    const subSize = Math.min(18, 12 + Math.floor(120 / mainCount));
-    const hasSecondLine = !!(hasKeys && keyText);
-    const hasThirdLine = !!(hasKeys && hasMidi && midiText && midiText !== keyText);
-    const mainY = h * 0.43;
+    const mergedText = ordered.map(n => midiToNoteName(n.midi)).join(' · ');
+    const mergedDetail = ordered.map(n => `${n.src}:${midiToNoteName(n.midi)}`).join('   ');
+    const summaryText = mergedText || (hasKeys ? keyText : midiText);
+    const detailText = mergedDetail || (hasKeys && hasMidi && midiText && midiText !== keyText ? ('MIDI  ' + midiText) : '');
+    const denseText = hasKeys && hasMidi
+      ? (`KEY ${keyLabels.join(' | ')}   +   MIDI ${midiLabels.join(' | ')}`)
+      : (hasKeys ? keyLabels.join(' | ') : midiLabels.join(' | '));
+    const sourceText = hasKeys && hasMidi ? `<KEYBOARD + MIDI ${letters}>` : (hasKeys ? (`<KEY ${letters}>`) : '<MIDI STREAM>');
+    const streamSeed = [sourceText, detailText, summaryText].filter(Boolean).join(' // ');
 
-    if (mainText) {
-      ctx.font = `780 ${mainSize}px "SF Pro Display", "Segoe UI", system-ui, sans-serif`;
-      ctx.fillStyle = `hsla(${hueDeg}, 48%, 95%, ${0.9 + 0.1 * keyDisplayReveal})`;
-      ctx.strokeStyle = `hsla(${hueDeg}, 40%, 68%, ${0.3 + 0.24 * keyDisplayReveal * prismGlow})`;
-      ctx.lineWidth = 2.15;
-      ctx.strokeText(mainText, w / 2, mainY);
-      ctx.fillText(mainText, w / 2, mainY);
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    const streamText = (`${streamSeed} // `).repeat(8 + textModeIdx * 4);
+    const streamSpan = Math.max(420, w * 0.8);
+    const scrollA = (now * (126 + textModeIdx * 34)) % streamSpan;
+    const scrollB = (now * (88 + textModeIdx * 22)) % streamSpan;
+    ctx.font = `640 ${12 + textModeIdx * 2}px ${codeFont}`;
+    ctx.fillStyle = `hsla(${hueDeg}, 30%, 84%, ${0.44 + 0.18 * keyDisplayReveal})`;
+    ctx.fillText(streamText, -scrollA, h * 0.2);
+    ctx.fillText(streamText, -scrollA + streamSpan, h * 0.2);
+    ctx.fillStyle = `hsla(${hueDeg}, 26%, 78%, ${0.32 + 0.16 * keyDisplayReveal})`;
+    ctx.fillText(streamText, -streamSpan + scrollB, h * 0.27);
+    ctx.fillText(streamText, scrollB, h * 0.27);
+
+    ctx.textAlign = 'center';
+    const summaryCount = Math.max(1, (summaryText ? summaryText.split('·').length : 1));
+    const summarySize = Math.min(62 + textModeIdx * 4, 30 + Math.floor(240 / summaryCount) + textModeIdx * 2);
+    const sourceSize = Math.max(15 + textModeIdx, Math.min(24 + textModeIdx, summarySize - 8));
+    const denseSize = Math.max(11, sourceSize - 1);
+
+    if (sourceText) {
+      ctx.font = `650 ${sourceSize}px ${codeFont}`;
+      ctx.fillStyle = `hsla(${hueDeg}, 30%, 88%, ${0.62 + 0.12 * keyDisplayReveal + rhythmA * 0.05})`;
+      ctx.fillText(sourceText, w / 2, h * 0.41);
     }
 
-    if (hasSecondLine) {
-      ctx.font = `620 ${subSize}px "SF Pro Text", system-ui, sans-serif`;
-      ctx.fillStyle = `hsla(${hueDeg}, 24%, 84%, ${0.58 + 0.14 * keyDisplayReveal + rhythmB * 0.06})`;
-      ctx.fillText(keyText, w / 2, h * 0.67);
+    if (denseText) {
+      ctx.font = `610 ${denseSize}px ${codeFont}`;
+      ctx.fillStyle = `hsla(${hueDeg}, 24%, 82%, ${0.52 + 0.1 * keyDisplayReveal + rhythmB * 0.04})`;
+      ctx.fillText(denseText, w / 2, h * 0.5);
     }
-    if (hasThirdLine) {
-      ctx.font = `560 ${Math.max(11, subSize - 1)}px "SF Pro Text", system-ui, sans-serif`;
-      ctx.fillStyle = `hsla(${hueDeg}, 18%, 78%, ${0.46 + 0.12 * keyDisplayReveal + rhythmA * 0.06})`;
-      ctx.fillText('MIDI  ' + midiText, w / 2, h * 0.8);
+
+    if (summaryText) {
+      const glitchJit = Math.sin(now * (16.0 + textModeIdx * 6.0) + summaryCount * 0.7) * (0.9 + 1.5 * txtFx);
+      ctx.font = `760 ${summarySize}px ${codeFont}`;
+      const offA = 1.2 + txtFx * 1.8;
+      const offB = 1.2 + txtFx * 1.6;
+      ctx.fillStyle = `hsla(${(hueDeg + 352) % 360}, 86%, 68%, ${0.16 + 0.12 * keyDisplayReveal})`;
+      ctx.fillText(summaryText, w / 2 + offA + glitchJit, h * 0.64);
+      ctx.fillStyle = `hsla(${(hueDeg + 18) % 360}, 86%, 72%, ${0.18 + 0.12 * keyDisplayReveal})`;
+      ctx.fillText(summaryText, w / 2 - offB - glitchJit, h * 0.64);
+      ctx.fillStyle = `hsla(${hueDeg}, 44%, 96%, ${0.9 + 0.08 * keyDisplayReveal})`;
+      ctx.shadowBlur = 22 + 14 * keyDisplayReveal + txtFx * 4;
+      ctx.shadowColor = `hsla(${hueDeg}, 72%, 68%, ${0.24 + 0.18 * keyDisplayReveal + txtFx * 0.04})`;
+      ctx.fillText(summaryText, w / 2, h * 0.64);
+      if (textModeIdx > 0) {
+        const strips = 2 + textModeIdx * 2;
+        for (let i = 0; i < strips; i++) {
+          const y = h * 0.56 + ((i + 1) / (strips + 2)) * h * 0.16;
+          const bandH = 2 + ((i + textModeIdx) % 3);
+          const xShift = ((i % 2 === 0 ? 1 : -1) * (1.8 + txtFx * 2.6)) + Math.sin(now * (22 + i * 3.5)) * 1.2;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, y, w, bandH);
+          ctx.clip();
+          ctx.fillStyle = `hsla(${(hueDeg + 8) % 360}, 38%, 94%, ${0.3 + 0.15 * keyDisplayReveal})`;
+          ctx.fillText(summaryText, w / 2 + xShift, h * 0.64);
+          ctx.restore();
+        }
+      }
+    }
+    if (detailText) {
+      ctx.font = `580 ${Math.max(11, sourceSize - 1)}px ${codeFont}`;
+      ctx.fillStyle = `hsla(${hueDeg}, 22%, 82%, ${0.5 + 0.12 * keyDisplayReveal + rhythmB * 0.05})`;
+      ctx.fillText(detailText, w / 2, h * 0.79);
     }
 
     const tags = [];
     if (hasKeys) tags.push('KEYBOARD');
     if (hasMidi) tags.push('MIDI');
-    ctx.font = '700 11px "SF Pro Text", system-ui, sans-serif';
-    ctx.fillStyle = `hsla(${hueDeg}, 24%, 78%, ${0.42 + 0.14 * keyDisplayReveal + rhythmA * 0.08})`;
-    ctx.fillText(tags.join('   •   '), w / 2, y0 + 16);
+    ctx.font = `700 11px ${codeFont}`;
+    ctx.fillStyle = `hsla(${hueDeg}, 24%, 80%, ${0.4 + 0.12 * keyDisplayReveal + rhythmA * 0.06})`;
+    ctx.fillText(tags.join('   •   '), w / 2, 16);
     ctx.shadowBlur = 0;
     keyDisplayTexture.needsUpdate = true;
+  }
+
+  function ensureNoteRepeatOverlay() {
+    if (noteRepeatOverlayEl) return;
+    if (!noteRepeatStyleEl) {
+      noteRepeatStyleEl = document.createElement('style');
+      noteRepeatStyleEl.textContent = `
+        .note-row-terminal {
+          position: absolute;
+          overflow: hidden;
+          padding-top: 9px;
+        }
+        .note-row-terminal::before {
+          content: attr(data-stream);
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: -2px;
+          white-space: nowrap;
+          overflow: hidden;
+          font: 760 11px/1 "SFMono-Regular","Menlo","Consolas",monospace;
+          letter-spacing: 0.1em;
+          color: rgba(188, 234, 255, 0.5);
+          text-shadow: 0 0 10px rgba(98, 180, 255, 0.26);
+          animation: terminalFlow var(--terminal-speed, 5.8s) linear infinite;
+          pointer-events: none;
+        }
+        .note-head-code {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 0;
+          border-radius: 0;
+          font: 860 22px/1.04 "SFMono-Regular","Menlo","Consolas",monospace;
+          letter-spacing: 0.03em;
+          background: transparent;
+          position: relative;
+          overflow: visible;
+          animation: noteCodeJitter 0.9s steps(2,end) infinite;
+          animation-delay: var(--gd, 0s);
+        }
+        .note-head-code .glyph-src {
+          color: rgba(146, 215, 255, 0.66);
+          font: 760 11px/1 "SFMono-Regular","Menlo","Consolas",monospace;
+          letter-spacing: 0.06em;
+        }
+        .note-head-code .glyph-code {
+          color: rgba(178,218,255,0.6);
+          font: 680 11px/1 "SFMono-Regular","Menlo","Consolas",monospace;
+          letter-spacing: 0.07em;
+          text-transform: uppercase;
+        }
+        .note-head-code .glyph-code-r {
+          color: rgba(178, 218, 255, 0.44);
+          letter-spacing: 0.09em;
+        }
+        .note-head-code .note-glyph-stack {
+          position: relative;
+          display: inline-grid;
+          place-items: center;
+          min-width: 2.2em;
+          line-height: 1;
+        }
+        .note-head-code .glyph-main {
+          grid-area: 1 / 1;
+          position: relative;
+          color: rgba(236,244,255,0.95);
+          text-shadow: 0 0 12px rgba(128,190,255,0.36);
+        }
+        .note-head-code .glyph-ca-r {
+          position: absolute;
+          inset: 0 0 0 0;
+          color: rgba(255,76,122,0.34);
+          transform: translate(0.65px, -0.12px);
+          pointer-events: none;
+          mix-blend-mode: screen;
+        }
+        .note-head-code .glyph-ca-c {
+          position: absolute;
+          inset: 0 0 0 0;
+          color: rgba(74,235,255,0.32);
+          transform: translate(-0.65px, 0.12px);
+          pointer-events: none;
+          mix-blend-mode: screen;
+        }
+        .note-head-code .glyph-caret {
+          color: rgba(220, 245, 255, 0.9);
+          font: 700 13px/1 "SFMono-Regular","Menlo","Consolas",monospace;
+          letter-spacing: 0;
+          animation: caretBlink 1s steps(2,end) infinite;
+          text-shadow: 0 0 8px rgba(160, 225, 255, 0.45);
+        }
+        @keyframes noteCodeJitter {
+          0% { transform: translate(0px, 0px); }
+          16% { transform: translate(0.42px, -0.16px); }
+          17% { transform: translate(-0.42px, 0.16px); }
+          18% { transform: translate(0px, 0px); }
+          52% { transform: translate(0px, 0px); }
+          53% { transform: translate(0.46px, 0px); }
+          55% { transform: translate(0px, 0px); }
+          100% { transform: translate(0px, 0px); }
+        }
+        @keyframes noteScan {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(120%); }
+        }
+        @keyframes terminalFlow {
+          0% { transform: translateX(0%); }
+          100% { transform: translateX(-38%); }
+        }
+        @keyframes caretBlink {
+          0%, 49% { opacity: 1; }
+          50%, 100% { opacity: 0.15; }
+        }
+      `;
+      document.head.appendChild(noteRepeatStyleEl);
+    }
+    noteRepeatOverlayEl = document.createElement('div');
+    noteRepeatOverlayEl.style.cssText = [
+      'position:fixed',
+      'inset:0',
+      'pointer-events:none',
+      'z-index:1400',
+      'opacity:0',
+      'transition:opacity 120ms ease-out'
+    ].join(';');
+    const rows = [
+      { top: '9.5%', alpha: 0.98, blur: 0 },
+      { top: '49%', alpha: 0.7, blur: 0.2 },
+      { top: '84%', alpha: 0.56, blur: 0.35 }
+    ];
+    rows.forEach((cfg, idx) => {
+      const row = document.createElement('div');
+      if (idx === 0) row.classList.add('note-row-terminal');
+      row.style.cssText = [
+        'position:absolute',
+        `top:${cfg.top}`,
+        'left:4%',
+        'right:4%',
+        'display:flex',
+        'flex-wrap:wrap',
+        'gap:8px 10px',
+        'justify-content:flex-start',
+        `opacity:${cfg.alpha}`,
+        `filter:blur(${cfg.blur}px)`
+      ].join(';');
+      noteRepeatOverlayEl.appendChild(row);
+      noteRepeatRowEls.push(row);
+    });
+    document.body.appendChild(noteRepeatOverlayEl);
+  }
+
+  function collectOrderedActiveNotes() {
+    const keyNotes = [];
+    keysPressed.forEach(k => {
+      const midi = KEY_TO_NOTE[k];
+      if (midi != null) keyNotes.push(Math.max(0, Math.min(127, midi)));
+    });
+    keyNotes.sort((a, b) => a - b);
+    const midiNotes = displayedMidiNotes && displayedMidiNotes.length
+      ? displayedMidiNotes.slice().sort((a, b) => a - b)
+      : [];
+    const merged = [];
+    keyNotes.forEach(m => merged.push({ midi: m, src: 'K' }));
+    midiNotes.forEach(m => merged.push({ midi: m, src: 'M' }));
+    merged.sort((a, b) => a.midi - b.midi || (a.src === 'K' ? -1 : 1));
+    return merged;
+  }
+
+  function updateNoteRepeatOverlay() {
+    ensureNoteRepeatOverlay();
+    const notes = collectOrderedActiveNotes();
+    if (!notes.length) {
+      noteRepeatOverlayEl.style.opacity = '0';
+      noteRepeatSignature = '';
+      return;
+    }
+    noteRepeatOverlayEl.style.opacity = '1';
+    const hueDeg = Math.round(currentKeyHue * 360) % 360;
+    const sig = `${hueDeg}|${notes.map(n => `${n.src}${midiToNoteName(n.midi)}`).join(',')}`;
+    if (sig === noteRepeatSignature) return;
+    noteRepeatSignature = sig;
+    const baseStream = notes.map((n, i) => {
+      const txt = midiToNoteName(n.midi);
+      const codeA = ((txt.charCodeAt(0) + i * 17 + hueDeg) % 16).toString(16).toUpperCase();
+      const codeB = ((txt.charCodeAt(txt.length - 1) + i * 9 + 7) % 16).toString(16).toUpperCase();
+      return `${n.src === 'M' ? 'MIDI' : 'KEY'} ${txt} 0x${codeA}${codeB}`;
+    }).join('   |   ');
+    const terminalStream = Array(2 + textModeIdx * 2).fill(baseStream).join('   //   ');
+    const htmlHead = notes.map((n, i) => {
+      const txt = midiToNoteName(n.midi);
+      const srcTag = n.src === 'M' ? 'M' : 'K';
+      const seedA = ((i * 17 + txt.charCodeAt(0) * 7) % 16).toString(16).toUpperCase();
+      const seedB = ((i * 11 + txt.charCodeAt(txt.length - 1) * 5) % 16).toString(16).toUpperCase();
+      const seedC = ((i * 13 + txt.length * 9 + hueDeg) % 16).toString(16).toUpperCase();
+      const seedD = ((i * 19 + txt.charCodeAt(0) + 3) % 16).toString(16).toUpperCase();
+      return `<span class="note-head-code" style="
+        --gd:${(i % 7) * 0.08}s;
+        color:hsla(${hueDeg},42%,94%,0.96);
+        text-shadow:0 0 12px hsla(${hueDeg},52%,70%,0.36);
+      ">
+        <span class="glyph-src">${srcTag}</span>
+        <span class="glyph-code">0x${seedA}${seedB}</span>
+        <span class="note-glyph-stack">
+          <span class="glyph-main">${txt}</span>
+          <span class="glyph-ca-r">${txt}</span>
+          <span class="glyph-ca-c">${txt}</span>
+        </span>
+        <span class="glyph-code glyph-code-r">${seedC}${seedD}</span>
+        <span class="glyph-caret">_</span>
+      </span>`;
+    }).join('');
+    const html = notes.map((n, i) => {
+      const txt = midiToNoteName(n.midi);
+      const srcTag = n.src === 'M' ? 'M:' : 'K:';
+      const a = i % 2 === 0 ? 0.9 : 0.76;
+      return `<span style="
+        display:inline-block;
+        padding:0;
+        border-radius:0;
+        font:780 19px/1.06 'JetBrains Mono','IBM Plex Mono','SFMono-Regular','Menlo','Consolas',monospace;
+        letter-spacing:0.05em;
+        color:hsla(${hueDeg},36%,96%,${a});
+        background:transparent;
+        text-shadow:0 0 8px hsla(${hueDeg},52%,70%,0.28);
+      ">${srcTag}${txt}</span>`;
+    }).join('');
+    noteRepeatRowEls.forEach((row, idx) => {
+      row.innerHTML = idx === 0 ? htmlHead : html;
+      if (idx === 0) {
+        row.setAttribute('data-stream', terminalStream);
+        row.style.setProperty('--terminal-speed', `${Math.max(2.6, 5.8 - textModeIdx * 1.1)}s`);
+      }
+      row.style.transform = idx === 0 ? 'translateX(0%)' : (idx === 1 ? 'translateX(6%)' : 'translateX(-4%)');
+    });
   }
 
   // --- Additional interaction state ---
@@ -2546,6 +3186,7 @@ import { initMidiPlayer } from './midi-player.js';
   let analyser = null;
   let analyserData = null;
   let bassLevel = 0, midLevel = 0, trebleLevel = 0, audioEnergy = 0;
+  let contourAudioLevel = 0;
 
   function initAnalyser() {
     if (analyser || !audioCtx) return;
@@ -2553,7 +3194,9 @@ import { initMidiPlayer } from './midi-player.js';
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.75;
     analyserData = new Uint8Array(analyser.frequencyBinCount);
-    if (compressor) compressor.connect(analyser);
+    if (outputBusGain) outputBusGain.connect(analyser);
+    else if (limiter) limiter.connect(analyser);
+    else if (compressor) compressor.connect(analyser);
   }
 
   function updateAudioLevels() {
@@ -2570,6 +3213,26 @@ import { initMidiPlayer } from './midi-player.js';
     midLevel = mid / ((midEnd - bassEnd) * 255);
     trebleLevel = treble / ((n - midEnd) * 255);
     audioEnergy = (bassLevel * 0.5 + midLevel * 0.3 + trebleLevel * 0.2);
+  }
+
+  function updateMixAutoGain() {
+    if (!mixAutoGain) return;
+    const midiActive = displayedMidiNotes && displayedMidiNotes.length > 0;
+    if (midiActive) {
+      // MIDI playback: keep dynamics natural but add mild poly protection.
+      const midiPoly = Math.max(1, displayedMidiNotes.length);
+      const midiComp = midiPoly > 1 ? 1 / (1 + Math.pow(midiPoly - 1, 1.05) * 0.06) : 1;
+      const targetMidi = Math.max(0.86, Math.min(1.0, midiComp));
+      mixAutoGain.gain.value += (targetMidi - mixAutoGain.gain.value) * 0.14;
+      return;
+    }
+    const polyKeyboard = keysPressed.size + sustainedVoices.size * 0.35;
+    const polyMidi = displayedMidiNotes.length;
+    const poly = Math.max(polyKeyboard, polyMidi, chordCount);
+    const polyComp = poly > 1 ? 1 / (1 + Math.pow(poly - 1, 1.1) * 0.16) : 1;
+    const energyComp = 1 - Math.min(0.16, audioEnergy * 0.11 + bassLevel * 0.06 + midLevel * 0.03);
+    const target = Math.max(0.72, Math.min(0.98, polyComp * energyComp));
+    mixAutoGain.gain.value += (target - mixAutoGain.gain.value) * 0.11;
   }
 
   // --- Microphone → visuals: intuitive, smooth, gated ---
@@ -2858,6 +3521,7 @@ import { initMidiPlayer } from './midi-player.js';
     // Audio analyzer → bass/mid/treble levels
     updateAudioLevels();
     updateMicLevel();
+    updateMixAutoGain();
 
     // No auto-ambient: sound/effects only on key press or MIDI playback
 
@@ -2878,13 +3542,15 @@ import { initMidiPlayer } from './midi-player.js';
     const micVisual = micVisualCurve(micLevelSmoothed);
     const audioBoost = audioEnergy * 0.6 + micVisual * 0.9;
     const bassHit = bassLevel > 0.4 ? (bassLevel - 0.4) * 2.5 : 0;
+    const contourTarget = clamp01(audioEnergy * 0.82 + micVisual * 1.08 + bassHit * 0.12);
+    contourAudioLevel += (contourTarget - contourAudioLevel) * 0.11;
 
-    const profileAttack = activeProfile.in != null ? activeProfile.in : 0.56;
-    const profileRelease = activeProfile.out != null ? activeProfile.out : 0.26;
-    const blendAttack = Math.max(0.5, Math.min(0.78, profileAttack));
-    const blendRelease = Math.max(0.24, Math.min(0.5, profileRelease));
+    const profileAttack = activeProfile.in != null ? activeProfile.in : 0.78;
+    const profileRelease = activeProfile.out != null ? activeProfile.out : 0.44;
+    const blendAttack = Math.max(0.64, Math.min(0.92, profileAttack));
+    const blendRelease = Math.max(0.36, Math.min(0.68, profileRelease));
     currentKaleidoFolds = smoothApproach(currentKaleidoFolds, targetKaleidoFolds, blendAttack, blendRelease);
-    kaleidoMix = smoothApproach(kaleidoMix, targetKaleidoMix, Math.min(0.62, blendAttack), Math.max(0.2, blendRelease * 0.9));
+    kaleidoMix = smoothApproach(kaleidoMix, targetKaleidoMix, Math.min(0.76, blendAttack), Math.max(0.28, blendRelease * 0.94));
     curSpiral = smoothApproach(curSpiral, tgtSpiral, blendAttack, blendRelease);
     curFlow = smoothApproach(curFlow, tgtFlow, blendAttack, blendRelease);
     curPulse = smoothApproach(curPulse, tgtPulse, blendAttack, blendRelease);
@@ -2896,9 +3562,11 @@ import { initMidiPlayer } from './midi-player.js';
     curWarp = smoothApproach(curWarp, tgtWarp, blendAttack, blendRelease);
     curPrism = smoothApproach(curPrism, tgtPrism, Math.min(0.58, blendAttack), Math.max(0.2, blendRelease * 0.92));
     curContrast = smoothApproach(curContrast, tgtContrast, blendAttack, blendRelease);
+    curBio = smoothApproach(curBio, tgtBio, Math.min(0.56, blendAttack), Math.max(0.2, blendRelease * 0.9));
+    curProfileRoll = smoothApproach(curProfileRoll, tgtProfileRoll, Math.min(0.5, blendAttack), Math.max(0.18, blendRelease * 0.9));
     if (now >= visualFreezeUntil && attractor.strength < 0.05) {
       targetKaleidoMix = Math.max(0.1, targetKaleidoMix * 0.998);
-      tgtGlitch *= 0.995; tgtSpiral *= 0.995; tgtFlow *= 0.995; tgtPulse *= 0.995; tgtShear *= 0.995; tgtWave *= 0.995; tgtWarp *= 0.995; tgtPrism *= 0.997;
+      tgtGlitch *= 0.995; tgtSpiral *= 0.995; tgtFlow *= 0.995; tgtPulse *= 0.995; tgtShear *= 0.995; tgtWave *= 0.995; tgtWarp *= 0.995; tgtPrism *= 0.997; tgtBio *= 0.996; tgtProfileRoll *= 0.992;
     }
     detectHeadPosition();
     const headSmooth = 0.068;
@@ -2952,8 +3620,10 @@ import { initMidiPlayer } from './midi-player.js';
               tgtWarp = blend.warp;
               tgtPrism = blend.prism;
               tgtContrast = blend.contrast;
+              tgtBio = blend.bio;
+              tgtProfileRoll = blend.rot;
               currentKeyHue = blend.hue;
-              activeProfile = { ...activeProfile, bloom: blend.bloom, ca: blend.ca, prism: blend.prism, in: blend.in, out: blend.out };
+              activeProfile = { ...activeProfile, bloom: blend.bloom, ca: blend.ca, prism: blend.prism, bio: blend.bio, rot: blend.rot, in: blend.in, out: blend.out };
             }
           }
         }
@@ -2965,7 +3635,7 @@ import { initMidiPlayer } from './midi-player.js';
     if (fastSwipeActive) sparkleTime = now;
     const gestureWarp = handKnob1 * 0.4;       // hand L→R = warp amount
     const gestureBloom = handKnob2 * 0.5;      // hand motion = bloom lift
-    const gestureSpiral = handKnob2 * 0.25;   // motion = spiral
+    const gestureSpiral = handKnob2 * 0.08;   // motion gives only a light twist
     const gestureGlitch = fastSwipeActive ? 0.7 : 0;
     const gestureKaleidoBias = (handKnob1 - 0.5) * 0.06;
     // Integrated effect amplitudes (each different, premium, smooth — glasses-like)
@@ -2982,15 +3652,17 @@ import { initMidiPlayer } from './midi-player.js';
     const breathe = 0.012 * syncA + 0.006 * syncB;
     const keyPush = attractor.strength > 0.05 ? (0.018 + 0.012 * syncB) * attractor.strength : 0;
     const idleKaleido = idleIntensity * 0.018 * syncA;
-    const targetRotation = breathe + keyPush + gestureKaleidoBias + headKaleidoBias + idleKaleido;
+    const profileSpin = curProfileRoll * (0.014 + 0.024 * Math.min(1, attractor.strength + 0.1));
+    const targetRotation = breathe + keyPush + gestureKaleidoBias + headKaleidoBias + idleKaleido + profileSpin;
     kaleidoRotation += (targetRotation - kaleidoRotation) * 0.4;
 
     if (camera) {
       const targetYaw = headOffset * ampYaw;
       const targetPitch = (0.5 - headYSmoothed) * ampPitch;
+      const profileRoll = curProfileRoll * (0.024 + 0.05 * Math.min(1, attractor.strength + 0.12));
       camera.rotation.y += (targetYaw - camera.rotation.y) * headLerp;
       camera.rotation.x += (targetPitch - camera.rotation.x) * headLerp;
-      camera.rotation.z += (headOffset * ampRoll - camera.rotation.z) * 0.06;
+      camera.rotation.z += ((headOffset * ampRoll + profileRoll) - camera.rotation.z) * 0.06;
       if (headTrackingActive) {
         const targetCamX = headOffset * ampCamX;
         const targetCamY = headOffsetY * ampCamY;
@@ -3002,6 +3674,7 @@ import { initMidiPlayer } from './midi-player.js';
     if (bgPlane && bgPlane.material && bgPlane.material.uniforms) {
       bgPlane.material.uniforms.time.value = now;
       bgPlane.material.uniforms.activeHue.value = currentKeyHue;
+      bgPlane.material.uniforms.audioLevel.value = contourAudioLevel;
     }
 
     if (useGPGPU && gpuCompute && positionVariable && velocityVariable && particlePoints) {
@@ -3144,7 +3817,7 @@ import { initMidiPlayer } from './midi-player.js';
       const arr = posAttr.array;
       const base = prismSpokeParticles.userData.basePos;
       const prismW = Math.max(0.12, 0.62 * radiateW + 0.38 * styleCrossover);
-      const rot = now * (0.18 + 0.14 * prismW);
+      const rot = now * (0.08 + 0.06 * prismW);
       const c = Math.cos(rot);
       const s = Math.sin(rot);
       for (let i = 0; i < arr.length; i += 3) {
@@ -3261,7 +3934,7 @@ import { initMidiPlayer } from './midi-player.js';
       const posAttr = plasmaParticles.geometry.attributes.position;
       const arr = posAttr.array;
       const off = plasmaParticles.userData.baseOffsets;
-      // Motion style by key: 0=spiral tendril, 1=linear burst, 2=figure-8, 3=noise drift
+      // Motion style by key: 0=arc plume, 1=linear burst, 2=figure-8, 3=noise drift
       const plasmaMotion = (attractor.col || 0) % 4;
       const sc = 0.7 + str * 1.4 + plasmaW * 0.5 * Math.sin(now * 2.2);
       for (let i = 0; i < PLASMA_POINTS; i++) {
@@ -3272,10 +3945,10 @@ import { initMidiPlayer } from './midi-player.js';
           const radius = branchT * 0.6 * sc;
           const jitter = 0.018 * Math.sin(i * 5.0 + now * 2.0);
           if (plasmaMotion === 0) {
-            const twist = branchT * 2.5 + now * 1.5 + branch * 0.5;
-            arr[i*3]   = attractor.x + Math.cos(branchAngle + twist) * radius + jitter;
-            arr[i*3+1] = attractor.y + branchT * 0.25 * Math.sin(now * 1.0 + branch) + off[i*3+1] * 0.25;
-            arr[i*3+2] = attractor.z + Math.sin(branchAngle + twist) * radius + jitter * 0.6;
+            const arc = 0.22 * radius * Math.sin(branchT * 6.0 + now * 1.2 + branch * 0.35);
+            arr[i*3]   = attractor.x + Math.cos(branchAngle) * radius + arc + jitter;
+            arr[i*3+1] = attractor.y + branchT * 0.24 * Math.sin(now * 1.0 + branch) + off[i*3+1] * 0.25;
+            arr[i*3+2] = attractor.z + Math.sin(branchAngle) * radius - arc * 0.7 + jitter * 0.6;
           } else if (plasmaMotion === 1) {
             arr[i*3]   = attractor.x + Math.cos(branchAngle) * radius + jitter * 0.5;
             arr[i*3+1] = attractor.y + branchT * 0.22 + off[i*3+1] * 0.15;
@@ -3289,10 +3962,10 @@ import { initMidiPlayer } from './midi-player.js';
             arr[i*3+2] = attractor.z + lz + Math.sin(branchAngle) * branchT * 0.15;
           } else {
             const drift = 0.05 * Math.sin(now * 0.6 + branch * 1.2) * branchT;
-            const twist = branchT * 1.8 + now * 0.6;
-            arr[i*3]   = attractor.x + Math.cos(branchAngle + twist) * radius * 0.7 + drift + off[i*3] * 0.15;
+            const wobble = 0.16 * radius * Math.sin(now * 0.7 + branch * 1.1 + branchT * 8.0);
+            arr[i*3]   = attractor.x + Math.cos(branchAngle) * radius * 0.72 + drift + wobble + off[i*3] * 0.15;
             arr[i*3+1] = attractor.y + branchT * 0.18 + 0.03 * Math.sin(now * 0.9 + branch * 1.5);
-            arr[i*3+2] = attractor.z + Math.sin(branchAngle + twist) * radius * 0.7 + drift * 0.6 + off[i*3+2] * 0.15;
+            arr[i*3+2] = attractor.z + Math.sin(branchAngle) * radius * 0.72 + drift * 0.6 - wobble * 0.7 + off[i*3+2] * 0.15;
           }
         } else {
           arr[i*3]   = attractor.x + off[i*3] * sc * 0.5 + 0.015 * Math.sin(now * 1.5 + i);
@@ -3346,9 +4019,11 @@ import { initMidiPlayer } from './midi-player.js';
 
     if (Math.floor(now * 6) % 1 === 0) updateHud();
     updateKeyDisplay();
+    updateNoteRepeatOverlay();
     if (keyDisplayMesh && keyDisplayMesh.visible && keyDisplayMesh.userData.baseY != null) {
       keyDisplayMesh.position.y = keyDisplayMesh.userData.baseY + 0.014 * Math.sin(now * 0.45);
-      keyDisplayMesh.rotation.z = 0.008 * Math.sin(now * 0.38 + 1.0);
+      keyDisplayMesh.rotation.z = 0.008 * Math.sin(now * 0.38 + 1.0) + curProfileRoll * 0.04;
+      keyDisplayMesh.rotation.y = curProfileRoll * 0.12 + 0.01 * Math.sin(now * 0.32 + 0.7);
     }
     if (headTrackingActive) updateGestureBar();
 
@@ -3360,23 +4035,31 @@ import { initMidiPlayer } from './midi-player.js';
         pu.kaleidoFolds.value = currentKaleidoFolds;
         pu.kaleidoRotation.value = kaleidoRotation;
         pu.kaleidoMix.value = kaleidoMix;
-        pu.chromaticOffset.value = Math.min(0.04, activeProfile.ca + touchIntensity * 0.004 + dblFlash * 0.007 + bassHit * 0.005 + micVisual * 0.005 + styleLsd * 0.006 + styleCrossover * 0.003);
+        pu.chromaticOffset.value = Math.min(0.018, activeProfile.ca + touchIntensity * 0.0011 + dblFlash * 0.0018 + bassHit * 0.0014 + micVisual * 0.0013 + styleLsd * 0.0018 + styleCrossover * 0.0009);
         const focusBreath = keysPressed.size === 0 ? 0.04 * Math.sin(now * 0.1) : 0;
         const idleBreath = idleIntensity * (0.06 * Math.sin(now * 0.15) + 0.04);
         pu.textureLayerMix.value = idleIntensity;
-        pu.bloomStrength.value = Math.min(3.6, (activeProfile.bloom + dblFlash * 1.25 + touchIntensity * 0.42 + audioBoost * 0.92 + micVisual * 0.75 + focusBreath + idleBreath + gestureBloom + 0.05 * syncA + styleMuseum * 0.16 + styleCrossover * 0.14) * 0.72);
-        pu.spiralAmt.value = Math.min(1.05, curSpiral * 0.55 + touchIntensity * 0.08 + trebleLevel * 0.1 + gestureSpiral * 0.45 + 0.02 * syncB + styleLsd * 0.08);
+        pu.bloomStrength.value = Math.min(4.2, (activeProfile.bloom + dblFlash * 1.35 + touchIntensity * 0.5 + audioBoost * 1.0 + micVisual * 0.78 + focusBreath + idleBreath + gestureBloom + 0.06 * syncA + styleMuseum * 0.16 + styleCrossover * 0.14) * 0.76);
+        pu.spiralAmt.value = Math.min(0.32, curSpiral * 0.14 + touchIntensity * 0.018 + trebleLevel * 0.024 + gestureSpiral * 0.12 + 0.006 * syncB + styleLsd * 0.016);
         pu.flowAmt.value = Math.min(1.7, curFlow + touchIntensity * 0.1 + 0.04 * syncA + styleMuseum * 0.14);
         pu.pulseAmt.value = Math.min(1.7, curPulse + midLevel * 0.15 + 0.03 * syncA + styleCrossover * 0.12);
         pu.shearAmt.value = Math.min(1.8, curShear + touchIntensity * 0.1 + 0.03 * syncB + styleMuseum * 0.08);
         pu.waveAmt.value = Math.min(1.8, curWave + trebleLevel * 0.2 + 0.04 * syncB + styleLsd * 0.2);
-        pu.glitchAmt.value = Math.min(1.25, curGlitch + dblFlash * 0.42 + bassHit * 0.28 + gestureGlitch + styleLsd * 0.22 + styleCrossover * 0.1);
+        pu.glitchAmt.value = Math.min(1.25, curGlitch + dblFlash * 0.42 + bassHit * 0.28 + gestureGlitch + styleLsd * 0.22 + styleCrossover * 0.1 + audioEnergy * 0.08 + touchIntensity * 0.05);
         pu.mirrorXY.value.set(curMirrorX, curMirrorY);
         pu.warpAmt.value = Math.min(1.55, curWarp + touchIntensity * 0.14 + midLevel * 0.18 + micVisual * 0.24 + gestureWarp + 0.035 * syncA + styleCrossover * 0.18 + styleLsd * 0.12);
-        pu.contrastBoost.value = Math.min(2.9, curContrast + dblFlash * 0.36 + bassHit * 0.3 + styleMuseum * 0.12 + styleCrossover * 0.1 + audioBoost * 0.05);
+        pu.contrastBoost.value = Math.min(3.1, curContrast + dblFlash * 0.42 + bassHit * 0.34 + styleMuseum * 0.14 + styleCrossover * 0.12 + audioBoost * 0.06);
         pu.headLook.value.set(headOffset_g, headOffsetY);
         pu.themeHue.value = currentKeyHue;
         pu.prismAmt.value = Math.min(1.2, curPrism + styleCrossover * 0.16 + styleLsd * 0.08);
+        pu.audioLevel.value = contourAudioLevel;
+        pu.bioAmt.value = Math.min(1.0, curBio + styleCrossover * 0.12 + micVisual * 0.08);
+        const pixelMixTarget = Math.min(1.0, PIXEL_MODE_VALUES[pixelModeIdx] + styleLsd * 0.09 + audioEnergy * 0.06);
+        const analogMixTarget = Math.min(1.0, ANALOG_MODE_VALUES[analogModeIdx] + styleMuseum * 0.08 + midLevel * 0.06 + micVisual * 0.05);
+        pu.pixelateMix.value += (pixelMixTarget - pu.pixelateMix.value) * 0.22;
+        pu.analogMix.value += (analogMixTarget - pu.analogMix.value) * 0.22;
+        pu.subpixelMix.value = Math.min(1.0, 0.3 + pu.pixelateMix.value * 0.56 + pu.analogMix.value * 0.24);
+        pu.jitterMix.value = Math.min(1.0, 0.2 + pu.analogMix.value * 0.5 + curGlitch * 0.24 + styleLsd * 0.18 + touchIntensity * 0.08);
         renderer.setRenderTarget(rtScene);
         renderer.render(scene, camera);
         renderer.setRenderTarget(null);

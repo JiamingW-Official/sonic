@@ -5,6 +5,17 @@
 import { Midi } from '@tonejs/midi';
 
 const MAX_NOTE_DURATION_SEC = 10;
+const IS_MOBILE = /iPad|iPhone|Android/i.test(navigator.userAgent);
+const LOOKAHEAD_SEC = IS_MOBILE ? 0.14 : 0.2;
+const CHUNK_MS = IS_MOBILE ? 32 : 24;
+const MIDI_POLY_LIMIT = IS_MOBILE ? 10 : 14;
+function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+function expressiveVelocity(note, overPoly) {
+  const base = clamp01(typeof note.velocity === 'number' ? note.velocity : 0.8);
+  // Keep MIDI dynamics natural, but reduce loudness jumps between notes/chords.
+  const shaped = 0.2 + Math.pow(base, 0.9) * 0.76;
+  return overPoly ? Math.max(0.06, shaped * 0.9) : shaped;
+}
 
 /**
  * @param {object} api
@@ -92,6 +103,7 @@ export function initMidiPlayer(api) {
     document.body.appendChild(floatPanel);
     progressWrap = document.createElement('div');
     progressWrap.className = 'midi-progress-wrap midi-progress-float';
+    progressWrap.dataset.orientation = 'horizontal';
     progressBar = document.createElement('div');
     progressBar.className = 'midi-progress-bar';
     progressBar.setAttribute('aria-label', 'Playback position');
@@ -110,7 +122,8 @@ export function initMidiPlayer(api) {
     const barInner = document.createElement('div');
     barInner.className = 'player-bar-inner';
     progressWrap = document.createElement('div');
-    progressWrap.className = 'midi-progress-wrap';
+    progressWrap.className = 'midi-progress-wrap midi-progress-float';
+    progressWrap.dataset.orientation = 'horizontal';
     progressBar = document.createElement('div');
     progressBar.className = 'midi-progress-bar';
     progressBar.setAttribute('aria-label', 'Playback position');
@@ -122,6 +135,7 @@ export function initMidiPlayer(api) {
     progressBar.appendChild(progressFill);
     progressWrap.appendChild(progressBar);
     progressWrap.style.display = 'none';
+    document.body.appendChild(progressWrap);
     const controlsRow = document.createElement('div');
     controlsRow.className = 'player-controls-row';
     const midiToggle = document.createElement('button');
@@ -131,7 +145,6 @@ export function initMidiPlayer(api) {
     midiToggle.textContent = 'MIDI';
     controlsRow.appendChild(btnWrap);
     controlsRow.appendChild(midiToggle);
-    barInner.appendChild(progressWrap);
     barInner.appendChild(controlsRow);
     playerBar.appendChild(barInner);
     const midiDrawer = document.createElement('div');
@@ -150,6 +163,7 @@ export function initMidiPlayer(api) {
   if (!progressBar) progressBar = document.querySelector('.midi-progress-bar');
   if (!waveCanvas && progressBar) waveCanvas = progressBar.querySelector('.midi-progress-wave');
   const progressFill = document.querySelector('.midi-progress-fill');
+  const isVerticalProgress = () => !!(progressWrap && progressWrap.dataset && progressWrap.dataset.orientation === 'vertical');
 
   let complexityBins = [];
   let totalDuration = 0;
@@ -193,13 +207,25 @@ export function initMidiPlayer(api) {
     if (!ctx) return;
     ctx.clearRect(0, 0, w, h);
     if (!complexityBins.length) return;
-    const barW = w / BAR_BINS;
-    const midY = h / 2;
-    ctx.fillStyle = 'rgba(255,255,255,0.2)';
-    for (let i = 0; i < BAR_BINS; i++) {
-      const v = complexityBins[i] || 0;
-      const barH = Math.max(1, (h * 0.4) * (0.2 + 0.8 * v));
-      ctx.fillRect(i * barW, midY - barH / 2, Math.ceil(barW) + 0.5, barH);
+    if (isVerticalProgress()) {
+      const stepH = h / BAR_BINS;
+      for (let i = 0; i < BAR_BINS; i++) {
+        const v = complexityBins[i] || 0;
+        const y = h - (i + 1) * stepH;
+        const lineW = Math.max(2, w * (0.18 + 0.82 * v));
+        const x = (w - lineW) * 0.5;
+        ctx.fillStyle = `rgba(150,235,255,${0.05 + 0.38 * v})`;
+        ctx.fillRect(x, y, lineW, Math.ceil(stepH) + 0.5);
+      }
+    } else {
+      const barW = w / BAR_BINS;
+      const midY = h / 2;
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      for (let i = 0; i < BAR_BINS; i++) {
+        const v = complexityBins[i] || 0;
+        const barH = Math.max(1, (h * 0.4) * (0.2 + 0.8 * v));
+        ctx.fillRect(i * barW, midY - barH / 2, Math.ceil(barW) + 0.5, barH);
+      }
     }
   }
 
@@ -213,7 +239,13 @@ export function initMidiPlayer(api) {
     if (totalDuration <= 0 || !progressFill) return;
     const t = getCurrentTime();
     const pct = Math.min(1, Math.max(0, t / totalDuration));
-    progressFill.style.width = (pct * 100) + '%';
+    if (isVerticalProgress()) {
+      progressFill.style.height = (pct * 100) + '%';
+      progressFill.style.width = '100%';
+    } else {
+      progressFill.style.width = (pct * 100) + '%';
+      progressFill.style.height = '100%';
+    }
   }
 
   function showProgressBar(show) {
@@ -230,8 +262,14 @@ export function initMidiPlayer(api) {
     endTimeoutId = null;
     if (rafId != null) cancelAnimationFrame(rafId);
     rafId = null;
-    activeVoices.forEach(v => { try { v.stop(); } catch (_) {} });
+    activeVoices.forEach(v => {
+      const stop = typeof v === 'function' ? v : (v && v.stop);
+      if (stop) {
+        try { stop(); } catch (_) {}
+      }
+    });
     activeVoices = [];
+    if (updateKeyDisplayFromMidi) updateKeyDisplayFromMidi([]);
     isPlaying = false;
   }
 
@@ -245,51 +283,117 @@ export function initMidiPlayer(api) {
     isPlaying = true;
     stopBtn.disabled = false;
     playBtn.disabled = true;
-    const notes = currentNotes.filter(n => n.time >= fromTime - 0.001);
-    const scheduledIndices = new Set();
-    const LOOKAHEAD = 0.4;
-    const CHUNK_MS = 50;
+    const prepared = [];
+    for (let i = 0; i < currentNotes.length; i++) {
+      const n = currentNotes[i];
+      const rawDur = Math.min(MAX_NOTE_DURATION_SEC, Math.max(0.02, n.duration));
+      const noteStart = n.time;
+      const noteEnd = n.time + rawDur;
+      if (noteEnd <= fromTime - 0.001) continue;
+      const relStart = Math.max(0, noteStart - fromTime);
+      const relEnd = Math.max(relStart + 0.02, noteEnd - fromTime);
+      prepared.push({
+        on: relStart,
+        off: relEnd,
+        midi: Math.max(0, Math.min(127, n.midi + currentTranspose)),
+        velocity: typeof n.velocity === 'number' ? n.velocity : 0.8,
+        drop: false
+      });
+    }
+    if (!prepared.length) {
+      isPlaying = false;
+      stopBtn.disabled = true;
+      playBtn.disabled = false;
+      playbackStartOffset = totalDuration;
+      updateProgressDisplay();
+      return;
+    }
+    prepared.sort((a, b) => a.on - b.on);
+    const offEvents = prepared.map(n => ({ off: n.off, midi: n.midi, note: n })).sort((a, b) => a.off - b.off);
+    let scheduleIdx = 0;
+    let onIdx = 0;
+    let offIdx = 0;
+    const activeMidiCounts = new Map();
+    let activePoly = 0;
+    const pendingStarts = [];
 
-    function scheduleChunk() {
-      const t = ctx.currentTime - segmentStartTime;
-      for (let i = 0; i < notes.length; i++) {
-        if (scheduledIndices.has(i)) continue;
-        const note = notes[i];
-        const noteTime = note.time - fromTime;
-        if (noteTime > t + LOOKAHEAD) break;
-        if (noteTime < t - 0.02) continue;
-        scheduledIndices.add(i);
-        const durationSec = Math.min(MAX_NOTE_DURATION_SEC, Math.max(0.02, note.duration));
-        const midi = Math.max(0, Math.min(127, note.midi + currentTranspose));
-        const voice = createSynthVoice(midi, {
+    function cleanupVoices(nowAbs) {
+      if (activeVoices.length === 0) return;
+      let w = 0;
+      for (let i = 0; i < activeVoices.length; i++) {
+        const v = activeVoices[i];
+        if (v && v.endAbs > nowAbs - 0.05) activeVoices[w++] = v;
+      }
+      activeVoices.length = w;
+    }
+
+    function scheduleChunk(relNow) {
+      const horizon = relNow + LOOKAHEAD_SEC;
+      while (pendingStarts.length && pendingStarts[0] <= relNow + 0.008) pendingStarts.shift();
+      while (scheduleIdx < prepared.length && prepared[scheduleIdx].on <= horizon) {
+        const note = prepared[scheduleIdx++];
+        const startRel = Math.max(relNow, note.on);
+        const durationSec = Math.max(0.02, note.off - startRel);
+        const polyEstimate = activePoly + pendingStarts.length;
+        const overPoly = polyEstimate >= MIDI_POLY_LIMIT;
+        if (overPoly && note.velocity < 0.2) {
+          note.drop = true;
+          continue;
+        }
+        const velocity = expressiveVelocity(note, overPoly);
+        const voice = createSynthVoice(note.midi, {
           sustained: true,
-          velocity: note.velocity,
+          velocity,
           fromMIDI: true,
           snapPitch: false,
-          startTime: segmentStartTime + noteTime,
-          duration: durationSec
+          startTime: segmentStartTime + startRel,
+          duration: durationSec,
+          polyHint: Math.max(1, polyEstimate + 1)
         });
-        activeVoices.push(voice);
-      }
-    }
-    const triggered = new Set();
-    const sounding = [];
-    function tick() {
-      scheduleChunk();
-      const t = ctx.currentTime;
-      sounding.length = 0;
-      for (let i = 0; i < notes.length; i++) {
-        const note = notes[i];
-        const triggerAt = segmentStartTime + (note.time - fromTime);
-        const dur = Math.min(MAX_NOTE_DURATION_SEC, Math.max(0.02, note.duration));
-        if (t >= triggerAt - 0.01 && t < triggerAt + dur)
-          sounding.push(Math.max(0, Math.min(127, note.midi + currentTranspose)));
-        if (!triggered.has(i) && t >= triggerAt - 0.01) {
-          triggered.add(i);
-          triggerVisualsForMidi(Math.max(0, Math.min(127, note.midi + currentTranspose)));
+        if (voice && voice.stop) {
+          activeVoices.push({ stop: voice.stop, endAbs: segmentStartTime + startRel + durationSec + 0.16 });
+          pendingStarts.push(note.on);
+          note.drop = false;
+        } else {
+          note.drop = true;
         }
       }
-      if (updateKeyDisplayFromMidi) updateKeyDisplayFromMidi(sounding.slice());
+    }
+
+    function tick() {
+      const relNow = ctx.currentTime - segmentStartTime;
+      scheduleChunk(relNow);
+
+      let visualsBudget = IS_MOBILE ? 6 : 12;
+      while (onIdx < prepared.length && prepared[onIdx].on <= relNow + 0.012) {
+        const note = prepared[onIdx++];
+        if (note.drop) continue;
+        const cur = (activeMidiCounts.get(note.midi) || 0) + 1;
+        activeMidiCounts.set(note.midi, cur);
+        activePoly++;
+        if (visualsBudget > 0) {
+          triggerVisualsForMidi(note.midi);
+          visualsBudget--;
+        }
+      }
+      while (offIdx < offEvents.length && offEvents[offIdx].off <= relNow) {
+        const evt = offEvents[offIdx++];
+        if (evt.note && evt.note.drop) continue;
+        const midi = evt.midi;
+        const cur = (activeMidiCounts.get(midi) || 0) - 1;
+        if (cur <= 0) activeMidiCounts.delete(midi);
+        else activeMidiCounts.set(midi, cur);
+        activePoly = Math.max(0, activePoly - 1);
+      }
+
+      if (updateKeyDisplayFromMidi) {
+        const sounding = [];
+        activeMidiCounts.forEach((count, midi) => { if (count > 0) sounding.push(midi); });
+        sounding.sort((a, b) => a - b);
+        updateKeyDisplayFromMidi(sounding);
+      }
+
+      cleanupVoices(ctx.currentTime);
     }
     function progressLoop() {
       updateProgressDisplay();
@@ -318,8 +422,9 @@ export function initMidiPlayer(api) {
   progressBar.addEventListener('click', (e) => {
     if (totalDuration <= 0) return;
     const rect = progressBar.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const pct = Math.max(0, Math.min(1, x / rect.width));
+    const pct = isVerticalProgress()
+      ? Math.max(0, Math.min(1, 1 - ((e.clientY - rect.top) / rect.height)))
+      : Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const seekTime = pct * totalDuration;
     playbackStartOffset = seekTime;
     updateProgressDisplay();

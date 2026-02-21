@@ -1,5 +1,6 @@
 * {
   box-sizing: border-box;
+  border-radius: 0 !important;
 }
 
 html, body {
@@ -24,6 +25,8 @@ html, body {
   display: block;
   width: 100%;
   height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 /* Very subtle vignette: focus on center */
@@ -35,6 +38,39 @@ html, body {
   pointer-events: none;
   background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.25) 100%);
   opacity: 0.5;
+}
+#canvas-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(120, 210, 255, 0.06) 0px,
+      rgba(120, 210, 255, 0.06) 1px,
+      rgba(0, 0, 0, 0) 1px,
+      rgba(0, 0, 0, 0) 3px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(90, 180, 255, 0.03) 0px,
+      rgba(90, 180, 255, 0.03) 1px,
+      rgba(0, 0, 0, 0) 1px,
+      rgba(0, 0, 0, 0) 4px
+    );
+  mix-blend-mode: screen;
+  opacity: 0.16;
+  animation: screen-flicker 4.2s steps(2, end) infinite;
+}
+
+@keyframes screen-flicker {
+  0%, 17%, 100% { opacity: 0.15; }
+  18% { opacity: 0.2; }
+  19% { opacity: 0.14; }
+  64% { opacity: 0.18; }
+  65% { opacity: 0.14; }
 }
 
 /* Intentional UI overlay layer — floats above effect canvas */
@@ -78,7 +114,7 @@ html, body {
   color: rgba(255, 255, 255, 0.95);
   background: rgba(28, 28, 30, 0.88);
   padding: 10px 18px;
-  border-radius: 12px;
+  border-radius: 0;
   -webkit-backdrop-filter: blur(20px) saturate(1.2);
   backdrop-filter: blur(20px) saturate(1.2);
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -101,7 +137,7 @@ html, body {
   z-index: 1100;
   max-width: 300px;
   padding: 14px 16px;
-  border-radius: 16px;
+  border-radius: 0;
   background: rgba(18, 18, 20, 0.82);
   -webkit-backdrop-filter: blur(20px) saturate(1.1);
   backdrop-filter: blur(20px) saturate(1.1);
@@ -109,23 +145,41 @@ html, body {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
   isolation: isolate;
 }
-.midi-progress-float {
+.midi-progress-wrap.midi-progress-float {
   position: fixed;
-  bottom: 100px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 33.333%;
-  max-width: 360px;
-  z-index: 1100;
-  padding: 0 6px;
+  right: 20px;
+  bottom: 22px;
+  left: auto;
+  transform: none;
+  width: 220px;
+  height: 14px;
+  z-index: 1120;
+  padding: 0;
   isolation: isolate;
 }
-.midi-progress-float .midi-progress-bar {
-  border-radius: 999px;
-  height: 22px;
+.midi-progress-wrap.midi-progress-float .midi-progress-bar {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  border: none;
+  background: linear-gradient(90deg, rgba(10, 14, 20, 0.72), rgba(8, 12, 18, 0.8));
+  box-shadow:
+    inset 0 0 14px rgba(0, 0, 0, 0.5),
+    0 0 10px rgba(255, 255, 255, 0.16);
 }
-.midi-progress-float .midi-progress-fill {
-  border-radius: 999px 0 0 999px;
+.midi-progress-wrap.midi-progress-float .midi-progress-fill {
+  left: 0;
+  right: auto;
+  top: 0;
+  bottom: auto;
+  width: 0%;
+  height: 100%;
+  border-radius: 0;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.95));
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.32);
+}
+.midi-progress-wrap.midi-progress-float .midi-progress-wave {
+  opacity: 0.52;
 }
 
 /* Legacy player bar (when #player-bar-root exists) */
@@ -170,7 +224,7 @@ html, body {
 }
 .player-midi-toggle {
   padding: 6px 14px;
-  border-radius: 20px;
+  border-radius: 0;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.9);
@@ -234,7 +288,7 @@ html, body {
 .midi-player-select {
   margin-left: 4px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0;
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: rgba(255, 255, 255, 0.08);
   color: inherit;
@@ -253,7 +307,7 @@ html, body {
 }
 .midi-player-btn {
   padding: 8px 20px;
-  border-radius: 24px;
+  border-radius: 0;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.95);
@@ -279,16 +333,16 @@ html, body {
 .midi-progress-bar {
   position: relative;
   height: 26px;
-  border-radius: 8px;
+  border-radius: 0;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(9, 14, 24, 0.72), rgba(6, 10, 18, 0.86));
+  border: none;
   cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 .midi-progress-bar:hover {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.45);
+  background: linear-gradient(180deg, rgba(12, 18, 30, 0.76), rgba(8, 12, 22, 0.9));
+  box-shadow: 0 0 16px rgba(80, 180, 255, 0.18);
 }
 .midi-progress-wave {
   position: absolute;
@@ -306,6 +360,6 @@ html, body {
   height: 100%;
   width: 0%;
   pointer-events: none;
-  background: linear-gradient(90deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.08) 100%);
-  border-radius: 8px 0 0 8px;
+  background: linear-gradient(90deg, rgba(80, 210, 255, 0.38) 0%, rgba(120, 255, 255, 0.2) 100%);
+  border-radius: 0;
 }
