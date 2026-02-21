@@ -8,13 +8,13 @@ const MAX_NOTE_DURATION_SEC = 10;
 const IS_MOBILE = /iPad|iPhone|Android/i.test(navigator.userAgent);
 const LOOKAHEAD_SEC = IS_MOBILE ? 0.14 : 0.2;
 const CHUNK_MS = IS_MOBILE ? 32 : 24;
-const MIDI_POLY_LIMIT = IS_MOBILE ? 10 : 14;
+const MIDI_POLY_LIMIT = IS_MOBILE ? 8 : 12;
 function clamp01(v) { return Math.max(0, Math.min(1, v)); }
 function expressiveVelocity(note, overPoly) {
   const base = clamp01(typeof note.velocity === 'number' ? note.velocity : 0.8);
-  // Keep MIDI dynamics natural, but reduce loudness jumps between notes/chords.
-  const shaped = 0.2 + Math.pow(base, 0.9) * 0.76;
-  return overPoly ? Math.max(0.06, shaped * 0.9) : shaped;
+  // Stable mapping for playback: preserve relative dynamics without big jumps.
+  const shaped = 0.58 + Math.pow(base, 0.86) * 0.34;
+  return overPoly ? Math.max(0.5, shaped * 0.95) : shaped;
 }
 
 /**

@@ -2274,11 +2274,13 @@ import { initMidiPlayer } from './midi-player.js';
       ? opts.polyHint
       : (fromMIDI ? Math.max(1, displayedMidiNotes.length) : Math.max(1, keysPressed.size));
     const nActive = Math.max(1, Math.min(24, polyHintInput));
-    const ecoMode = fromMIDI && nActive >= 8;
-    const ultraEco = fromMIDI && nActive >= 12;
+    // Keep one stable synth identity in MIDI playback: no architecture switches by poly.
+    const ecoMode = false;
+    const ultraEco = false;
     const harmonyMode = getHarmonyMode();
     const harmonyPolyLimit = fromMIDI ? 5 : 7;
-    const harmonyEnabled = harmonyMode !== 'off' && nActive >= 2 && nActive <= harmonyPolyLimit;
+    // Harmony is keyboard-only; MIDI should reproduce source notes cleanly and predictably.
+    const harmonyEnabled = !fromMIDI && harmonyMode !== 'off' && nActive >= 2 && nActive <= harmonyPolyLimit;
     const harmonySemitone = harmonyEnabled ? getHarmonySemitone(harmonyMode, midi) : 0;
     const harmonyRatio = harmonyEnabled ? Math.pow(2, harmonySemitone / 12) : 1.0;
 
@@ -3219,11 +3221,9 @@ import { initMidiPlayer } from './midi-player.js';
     if (!mixAutoGain) return;
     const midiActive = displayedMidiNotes && displayedMidiNotes.length > 0;
     if (midiActive) {
-      // MIDI playback: keep dynamics natural but add mild poly protection.
-      const midiPoly = Math.max(1, displayedMidiNotes.length);
-      const midiComp = midiPoly > 1 ? 1 / (1 + Math.pow(midiPoly - 1, 1.05) * 0.06) : 1;
-      const targetMidi = Math.max(0.86, Math.min(1.0, midiComp));
-      mixAutoGain.gain.value += (targetMidi - mixAutoGain.gain.value) * 0.14;
+      // MIDI playback: fixed gain target to avoid audible pumping.
+      const targetMidi = 0.92;
+      mixAutoGain.gain.value += (targetMidi - mixAutoGain.gain.value) * 0.08;
       return;
     }
     const polyKeyboard = keysPressed.size + sustainedVoices.size * 0.35;
