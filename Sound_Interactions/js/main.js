@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
+import { initMidiPlayer } from './midi-player.js';
 
 (function () {
   const GRID_COLS = 12;
@@ -1645,11 +1646,15 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
   }
 
   function createSynthVoice(midiNote, opts) {
-    const midi = snapToNatural(midiNote);
+    const midi = opts.snapPitch === false
+      ? Math.max(0, Math.min(127, Math.round(midiNote)))
+      : snapToNatural(midiNote);
     const sustained = !!opts.sustained;
     const velocity = opts.velocity != null ? opts.velocity : 0.8;
+    const fromMIDI = !!opts.fromMIDI;
     const freq = midiToFreq(midi);
-    const now = audioCtx.currentTime;
+    const now = opts.startTime != null ? opts.startTime : audioCtx.currentTime;
+    const hasScheduledDuration = opts.duration != null && opts.startTime != null;
 
     // Rich multi-oscillator voice: saw + pulse + triangle sub + noise transient
     const osc1 = audioCtx.createOscillator();
@@ -1677,35 +1682,42 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     subGain.gain.value = 0.2;
     sub.connect(subGain);
 
-    // Filter: resonant lowpass with envelope
+    // Filter: resonant lowpass, instant open then gentle close
     const filter = audioCtx.createBiquadFilter();
     filter.type = 'lowpass';
-    const filterBase = sustained ? 1200 : 2000;
-    const filterPeak = sustained ? 4500 : 6000;
+    const filterBase = sustained ? 1400 : 2200;
+    const filterPeak = sustained ? 5000 : 6500;
     filter.frequency.setValueAtTime(filterPeak, now);
-    filter.frequency.exponentialRampToValueAtTime(filterBase, now + (sustained ? 0.3 : 0.15));
+    filter.frequency.exponentialRampToValueAtTime(filterBase, now + (sustained ? 0.2 : 0.08));
     filter.Q.value = sustained ? 3 : 5;
 
-    // Amp envelope: softer attack for chords
-    const nActive = keysPressed.size;
-    const chordVel = velocity * (nActive > 1 ? 0.7 / Math.sqrt(nActive) : 1); // auto-balance chords
+    // Amp envelope: instant attack (no phase-in delay), full velocity for MIDI
+    const nActive = fromMIDI ? 1 : keysPressed.size;
+    const chordVel = velocity * (nActive > 1 ? 0.7 / Math.sqrt(nActive) : 1);
     const envGain = audioCtx.createGain();
     envGain.gain.value = 0;
-    const a = sustained ? 0.02 : 0.005;
-    const d = sustained ? 0.2 : 0.1;
-    const s = sustained ? 0.5 : 0.15;
-    const r = sustained ? 0.6 : 0.35;
+    const a = 0.001; // instant attack
+    const d = sustained ? 0.15 : 0.06;
+    const s = sustained ? 0.5 : 0.12;
+    const r = sustained ? 0.5 : 0.25;
+    const releaseEnd = now + a + d + r;
     envGain.gain.setValueAtTime(0, now);
     envGain.gain.linearRampToValueAtTime(chordVel, now + a);
     envGain.gain.linearRampToValueAtTime(chordVel * s, now + a + d);
-    if (!sustained) envGain.gain.linearRampToValueAtTime(0, now + a + d + r);
+    if (hasScheduledDuration) {
+      const endTime = now + Math.max(0.02, opts.duration);
+      envGain.gain.setValueAtTime(chordVel * s, endTime);
+      envGain.gain.linearRampToValueAtTime(0, endTime + r);
+    } else if (!sustained) {
+      envGain.gain.linearRampToValueAtTime(0, releaseEnd);
+    }
 
-    // LFO for sustained notes (vibrato + filter wobble)
-    if (sustained) {
+    // LFO for sustained notes (skip when scheduled MIDI note to keep timing exact)
+    if (sustained && !hasScheduledDuration) {
       const vib = audioCtx.createOscillator(); vib.frequency.value = 4.5;
       const vibGain = audioCtx.createGain(); vibGain.gain.value = 3;
       vib.connect(vibGain); vibGain.connect(osc1.frequency); vibGain.connect(osc2.frequency);
-      vib.start(now + 0.3); // delayed vibrato onset
+      vib.start(now + 0.2);
 
       const filterLfo = audioCtx.createOscillator(); filterLfo.frequency.value = 1.8;
       const filterLfoGain = audioCtx.createGain(); filterLfoGain.gain.value = 800;
@@ -1720,16 +1732,22 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     filter.connect(envGain);
     envGain.connect(masterGain);
 
+    const stopTime = hasScheduledDuration ? now + Math.max(0.02, opts.duration) + r : (now + a + d + r);
     osc1.start(now); osc2.start(now); osc3.start(now); sub.start(now);
+    if (hasScheduledDuration) {
+      osc1.stop(stopTime); osc2.stop(stopTime); osc3.stop(stopTime); sub.stop(stopTime);
+    }
 
     function stop() {
       const t = audioCtx.currentTime;
       envGain.gain.cancelScheduledValues(t);
       envGain.gain.setValueAtTime(envGain.gain.value, t);
-      envGain.gain.linearRampToValueAtTime(0, t + r);
-      setTimeout(() => { try { osc1.stop(); osc2.stop(); osc3.stop(); sub.stop(); } catch (_) {} }, (r + 0.1) * 1000);
+      envGain.gain.linearRampToValueAtTime(0, t + 0.02);
+      try { osc1.stop(t); osc2.stop(t); osc3.stop(t); sub.stop(t); } catch (_) {}
     }
-    if (!sustained) setTimeout(() => { try { osc1.stop(); osc2.stop(); osc3.stop(); sub.stop(); } catch (_) {} }, (a + d + r + 0.1) * 1000);
+    if (!sustained && !hasScheduledDuration) {
+      osc1.stop(stopTime); osc2.stop(stopTime); osc3.stop(stopTime); sub.stop(stopTime);
+    }
     return { stop };
   }
 
@@ -1794,6 +1812,12 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     tgtContrast = activeProfile.contrast;
     burstRingTime = performance.now() * 0.001;
   }
+
+  function getAudioContext() {
+    initAudio();
+    return audioCtx;
+  }
+  initMidiPlayer({ createSynthVoice, triggerVisualsForMidi, initAudio, getAudioContext });
 
   // Mode HUD: intentional, legible, minimal
   let hudEl = null;
@@ -2424,37 +2448,22 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     mouseVelocity *= 0.9;
     touchIntensity = Math.min(1, mouseVelocity / 50);
 
-    // Idle auto-play: build → hold → decay (capped so no infinite stacking / lag)
+    // No idle auto-play: effects only when key pressed or MIDI playing (no automatic texture/blink)
     const isIdle = keysPressed.size === 0 && attractor.strength < 0.06;
-    const dt = 1 / 60;
     if (!isIdle) {
       idlePhase = 'rest';
       idleIntensity *= 0.92;
       idleTimer = 0;
     } else {
-      if (idlePhase === 'rest') {
-        idleTimer += dt;
-        if (idleTimer >= IDLE_REST_SEC) { idlePhase = 'build'; idleTimer = 0; }
-      } else if (idlePhase === 'build') {
-        idleIntensity = Math.min(IDLE_CAP, idleIntensity + IDLE_BUILD_RATE);
-        if (idleIntensity >= IDLE_CAP) { idlePhase = 'hold'; idleTimer = 0; }
-      } else if (idlePhase === 'hold') {
-        idleTimer += dt;
-        if (idleTimer >= IDLE_HOLD_SEC) idlePhase = 'decay';
-      } else if (idlePhase === 'decay') {
-        idleIntensity = Math.max(0, idleIntensity - IDLE_DECAY_RATE);
-        if (idleIntensity <= 0) { idlePhase = 'rest'; idleTimer = 0; }
-      }
+      idleIntensity *= 0.96;
+      if (idleIntensity < 0.005) idleIntensity = 0;
     }
 
     // Audio analyzer → bass/mid/treble levels
     updateAudioLevels();
     updateMicLevel();
 
-    // Auto-ambient after idle
-    if (!ambientMode && performance.now() - lastUserAction > AMBIENT_DELAY && audioCtx) {
-      startAmbient();
-    }
+    // No auto-ambient: sound/effects only on key press or MIDI playback
 
     // Gyro → head offset (if no camera tracking but gyro available)
     if (gyroEnabled && !headTrackingActive) {
@@ -2477,12 +2486,12 @@ import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js';
     const lerpRate = 0.095;
     currentKaleidoFolds += (targetKaleidoFolds - currentKaleidoFolds) * lerpRate;
     kaleidoMix += (targetKaleidoMix - kaleidoMix) * 0.08;
-    curSpiral += (tgtSpiral - curSpiral) * 0.085;
-    curFlow += (tgtFlow - curFlow) * 0.085;
-    curPulse += (tgtPulse - curPulse) * 0.085;
-    curShear += (tgtShear - curShear) * 0.085;
-    curWave += (tgtWave - curWave) * 0.085;
-    curGlitch += (tgtGlitch - curGlitch) * 0.09;
+    curSpiral += (tgtSpiral - curSpiral) * 0.12;
+    curFlow += (tgtFlow - curFlow) * 0.12;
+    curPulse += (tgtPulse - curPulse) * 0.12;
+    curShear += (tgtShear - curShear) * 0.12;
+    curWave += (tgtWave - curWave) * 0.12;
+    curGlitch += (tgtGlitch - curGlitch) * 0.12;
     curMirrorX += (tgtMirrorX - curMirrorX) * 0.13;
     curMirrorY += (tgtMirrorY - curMirrorY) * 0.13;
     curWarp += (tgtWarp - curWarp) * 0.11;

@@ -87,3 +87,88 @@ html, body {
   visibility: visible;
   transform: translateX(-50%) translateY(-4px);
 }
+
+/* MIDI player panel: compact, clear, pointer-events for interaction */
+.midi-player {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 1000;
+  pointer-events: auto;
+  font: 10px/1.5 "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(0, 0, 0, 0.4);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  padding: 10px 12px;
+  border-radius: 8px;
+  min-width: 180px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background 0.2s ease;
+}
+.midi-player:hover {
+  background: rgba(0, 0, 0, 0.5);
+}
+.midi-player-label {
+  display: block;
+  margin-bottom: 6px;
+  cursor: default;
+}
+.midi-player-file {
+  margin-left: 4px;
+  cursor: pointer;
+  font-size: 10px;
+}
+.midi-player-tracks {
+  margin: 6px 0;
+  max-height: 100px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.midi-player-track {
+  display: block;
+  margin: 2px 0;
+  cursor: pointer;
+  padding: 1px 0;
+}
+.midi-player-track:hover {
+  color: rgba(255, 255, 255, 1);
+}
+.midi-player-select {
+  margin-left: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.midi-player-info {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 4px 0;
+}
+.midi-player-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.midi-player-btn {
+  padding: 5px 12px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.1);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.midi-player-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.midi-player-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
