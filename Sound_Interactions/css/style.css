@@ -36,6 +36,7 @@ html, body {
   width: 100%;
   height: 100%;
   image-rendering: pixelated;
+  image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
 }
 
@@ -71,7 +72,7 @@ html, body {
       rgba(0, 0, 0, 0) 4px
     );
   mix-blend-mode: screen;
-  opacity: 0.16;
+  opacity: var(--interlace-opacity, 0.16);
   animation: screen-flicker 4.2s steps(2, end) infinite;
 }
 
@@ -141,36 +142,66 @@ html, body {
 
 .hud-top-menu {
   position: fixed;
-  top: 4px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 97vw;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 1450;
   pointer-events: none;
-  white-space: nowrap;
+  display: flex;
+  align-items: stretch;
+  height: 22px;
+  padding: 0;
+  color: #000;
+  font: 11px/22px "Tahoma", "MS Sans Serif", sans-serif;
+  letter-spacing: 0.01em;
+  background: #c0c0c0;
+  border-bottom: 1px solid #808080;
+  box-shadow: inset 0 1px 0 #fff, 0 1px 0 #404040;
+  text-shadow: none;
+}
+.hud-menu-items {
+  display: flex;
+  align-items: center;
+  pointer-events: auto;
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+.hud-menu-item {
+  display: inline-block;
+  padding: 0 7px;
+  color: #000;
+  cursor: default;
+  height: 20px;
+  line-height: 20px;
+}
+.hud-menu-item:hover {
+  background: #000080;
+  color: #fff;
+}
+.hud-menu-item .hud-accel {
+  text-decoration: underline;
+}
+.hud-status-bar {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: 4px 10px;
-  color: var(--ui-text-main);
-  font: 11px/1.14 var(--ui-code-font);
-  letter-spacing: 0.045em;
-  background: linear-gradient(180deg, var(--ui-panel-top), var(--ui-panel-bottom));
-  border: 1px solid var(--ui-panel-line);
-  box-shadow:
-    inset 1px 1px 0 rgba(255, 255, 255, 0.26),
-    inset -1px -1px 0 rgba(0, 0, 0, 0.44),
-    0 0 12px var(--ui-panel-glow);
-  text-shadow: 0 0 7px rgba(120, 194, 255, 0.24);
-  -webkit-backdrop-filter: blur(2px) saturate(1.03);
-  backdrop-filter: blur(2px) saturate(1.03);
+  white-space: nowrap;
+  margin: 2px 3px 2px 6px;
+  padding: 0 4px;
+  color: #000;
+  font: 10px/18px "Tahoma", "MS Sans Serif", sans-serif;
+  background: #c0c0c0;
+  box-shadow: inset -1px -1px 0 #fff, inset 1px 1px 0 #808080;
 }
 
 /* Windows 95 inspired MIDI UI */
 .midi-float-panel {
   position: fixed;
-  top: 12px;
+  top: 28px;
   right: 12px;
   z-index: 1100;
+  width: 370px;
   max-width: 370px;
   padding: 10px 11px;
   background: #c0c0c0;
@@ -386,10 +417,16 @@ html, body {
   margin: 6px 0 4px;
   max-height: 120px;
   overflow-y: auto;
-  scrollbar-width: thin;
+  scrollbar-width: thin; /* Firefox 64+, Chrome 121+ */
   border: 1px solid #000;
   background: #fff;
   padding: 3px 4px;
+}
+.midi-player-tracks::-webkit-scrollbar {
+  width: 8px;
+}
+.midi-player-tracks::-webkit-scrollbar-thumb {
+  background: #888;
 }
 .midi-player-track {
   display: flex;
@@ -533,6 +570,7 @@ html, body {
   height: 100%;
   display: block;
   image-rendering: pixelated;
+  image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
   cursor: crosshair;
   pointer-events: auto;
@@ -604,7 +642,8 @@ html, body {
 @media (max-width: 720px) {
   .midi-float-panel {
     right: 8px;
-    top: 8px;
+    top: 26px;
+    width: 284px;
     max-width: 284px;
   }
   .midi-progress-wrap.midi-progress-float {
@@ -631,4 +670,221 @@ html, body {
     font-size: 9px;
     padding: 1px 4px;
   }
+}
+
+/* ═══ Y2K Design Elements ═══ */
+
+/* Corner Bracket Frame */
+.y2k-bracket {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  border-color: rgba(180, 220, 255, 0.35);
+  border-style: solid;
+  border-width: 0;
+}
+.y2k-bracket-tl { top: 3.5%; left: 3.5%; border-top-width: 1px; border-left-width: 1px; }
+.y2k-bracket-tr { top: 3.5%; right: 3.5%; border-top-width: 1px; border-right-width: 1px; }
+.y2k-bracket-bl { bottom: 3.5%; left: 3.5%; border-bottom-width: 1px; border-left-width: 1px; }
+.y2k-bracket-br { bottom: 3.5%; right: 3.5%; border-bottom-width: 1px; border-right-width: 1px; }
+
+/* Cross-hair Registration Marks */
+.y2k-cross {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font: 300 14px/1 "Lucida Console", "Courier New", monospace;
+  color: rgba(180, 220, 255, 0.18);
+  text-shadow: 0 0 6px rgba(120, 190, 255, 0.12);
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+/* Horizontal Scan Line */
+#y2k-scanline {
+  position: fixed;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+  top: 0;
+  z-index: 1360;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(160, 220, 255, 0.06) 15%,
+    rgba(200, 240, 255, 0.22) 50%,
+    rgba(160, 220, 255, 0.06) 85%,
+    transparent 100%
+  );
+  box-shadow: 0 0 8px rgba(140, 210, 255, 0.12);
+  mix-blend-mode: screen;
+  will-change: transform;
+  animation: y2k-scan-sweep 8.5s linear infinite;
+}
+@keyframes y2k-scan-sweep {
+  0%   { transform: translateY(95vh); opacity: 0; }
+  3%   { opacity: 0.6; }
+  92%  { opacity: 0.6; }
+  97%  { opacity: 0; }
+  100% { transform: translateY(5vh); opacity: 0; }
+}
+
+/* Micro-text Data Stream */
+#y2k-datastream {
+  position: fixed;
+  bottom: 3.5%;
+  left: 3.5%;
+  right: 30%;
+  height: 14px;
+  z-index: 1375;
+  pointer-events: none;
+  overflow: hidden;
+  mix-blend-mode: screen;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%);
+}
+.y2k-datastream-inner {
+  white-space: nowrap;
+  font: 400 9px/14px "Lucida Console", "Courier New", monospace;
+  letter-spacing: 0.15em;
+  color: rgba(170, 215, 255, 0.32);
+  text-shadow: 0 0 6px rgba(120, 190, 255, 0.14);
+  animation: y2k-stream-scroll 28s linear infinite;
+}
+@keyframes y2k-stream-scroll {
+  0%   { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Gradient Mesh Corners */
+.y2k-gradient-corner {
+  position: absolute;
+  width: 45vw;
+  height: 45vh;
+  border-radius: 50%;
+  filter: blur(80px);
+  mix-blend-mode: screen;
+  opacity: 0.04;
+  pointer-events: none;
+  will-change: opacity;
+}
+.y2k-gc-tl {
+  top: -12%;
+  left: -8%;
+  background: radial-gradient(circle, currentColor 0%, transparent 70%);
+}
+.y2k-gc-br {
+  bottom: -12%;
+  right: -8%;
+  background: radial-gradient(circle, currentColor 0%, transparent 70%);
+}
+
+/* Mini Spectrum Analyzer */
+#y2k-spectrum {
+  position: fixed;
+  bottom: 7.5%;
+  right: 3.5%;
+  z-index: 1378;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 32px;
+  opacity: 0.3;
+  mix-blend-mode: screen;
+}
+.y2k-spec-bar {
+  width: 4px;
+  min-height: 2px;
+  border-radius: 1px 1px 0 0;
+  transition: height 80ms ease-out, background 300ms;
+  will-change: height;
+}
+
+/* Chord Type Display */
+#y2k-chord {
+  position: fixed;
+  bottom: 12%;
+  left: 3.5%;
+  z-index: 1378;
+  pointer-events: none;
+  font: 200 22px/1 "Lucida Console", "Courier New", monospace;
+  letter-spacing: 0.1em;
+  color: rgba(200, 230, 255, 0.5);
+  text-shadow: 0 0 18px rgba(120, 190, 255, 0.2);
+  mix-blend-mode: screen;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+#y2k-chord-sub {
+  font: 400 9px/1.4 "Lucida Console", "Courier New", monospace;
+  letter-spacing: 0.2em;
+  color: rgba(170, 210, 255, 0.35);
+  margin-top: 4px;
+}
+
+/* Arc Progress Ring */
+#y2k-arc {
+  position: fixed;
+  bottom: 5.5%;
+  right: 12%;
+  width: 44px;
+  height: 44px;
+  z-index: 1376;
+  pointer-events: none;
+  opacity: 0.28;
+  mix-blend-mode: screen;
+}
+#y2k-arc svg { width: 100%; height: 100%; }
+#y2k-arc circle {
+  fill: none;
+  stroke-linecap: round;
+}
+.y2k-arc-bg { stroke: rgba(140, 200, 255, 0.08); stroke-width: 1.5; }
+.y2k-arc-fg { stroke: rgba(180, 220, 255, 0.45); stroke-width: 1.5; transition: stroke-dashoffset 120ms; }
+#y2k-arc-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 600 7px/1 "Lucida Console", monospace;
+  letter-spacing: 0.08em;
+  color: rgba(180, 220, 255, 0.45);
+}
+
+/* Breathing Dots */
+.y2k-dot {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(180, 220, 255, 0.3);
+  box-shadow: 0 0 6px rgba(140, 200, 255, 0.15);
+  mix-blend-mode: screen;
+  animation: y2k-dot-breathe 3.2s ease-in-out infinite;
+  will-change: opacity;
+}
+@keyframes y2k-dot-breathe {
+  0%, 100% { opacity: 0.15; transform: scale(0.8); }
+  50% { opacity: 0.55; transform: scale(1.2); }
+}
+
+/* System ID Badge */
+#y2k-sysid {
+  position: fixed;
+  top: 3.8%;
+  left: 3.5%;
+  z-index: 1365;
+  pointer-events: none;
+  font: 400 8px/1.5 "Lucida Console", "Courier New", monospace;
+  letter-spacing: 0.18em;
+  color: rgba(160, 205, 255, 0.22);
+  text-shadow: 0 0 4px rgba(120, 180, 255, 0.08);
+  mix-blend-mode: screen;
+  opacity: 0.6;
+  text-transform: uppercase;
+}
+#y2k-sysid span {
+  display: block;
 }
