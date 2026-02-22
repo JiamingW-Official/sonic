@@ -220,7 +220,7 @@ html, body {
   bottom: 12px;
   left: auto;
   transform: none;
-  width: 410px;
+  width: 370px;
   height: 34px;
   z-index: 1120;
   padding: 1px;
@@ -649,7 +649,7 @@ html, body {
   .midi-progress-wrap.midi-progress-float {
     right: 8px;
     bottom: 8px;
-    width: 300px;
+    width: 284px;
     height: 28px;
     padding: 1px;
   }
@@ -1259,4 +1259,24 @@ html, body {
   mix-blend-mode: screen;
   background: rgba(160, 210, 255, 0.2);
   transition: width 80ms, opacity 80ms;
+}
+
+/* ── Audio Constellation ── TOP-LEFT interactive tone circle */
+#y2k-constellation {
+  position: fixed;
+  top: 4%;
+  left: 0.8%;
+  width: 240px;
+  height: 240px;
+  z-index: 1382;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.5;
+  contain: strict;
+  transform: translateZ(0);
+}
+#y2k-constellation canvas {
+  width: 100%;
+  height: 100%;
+  image-rendering: auto;
 }

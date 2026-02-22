@@ -1400,6 +1400,19 @@ import { initMidiPlayer } from './midi-player.js';
   let polycountLabelEl = null;
   let tickerBars = [];
   let lastFreqHz = 0;
+  let constellationEl = null;
+  let constellationCanvas = null;
+  let constellationCtx = null;
+  let constellationMouseX = -9999;
+  let constellationMouseY = -9999;
+  let constellationShockwave = 0;
+  let constellationFade = new Float32Array(12);
+  let constellationParticles = null;   // lazy-init array of {x,y,vx,vy}
+  let orbitRingRef = null;
+  let orbitDotRefs = null;
+  let frameBudgetOver = 0;             // counts consecutive slow frames
+  let beatFlashEl = null;              // full-screen beat flash overlay
+  let beatFlashLevel = 0;             // smoothed flash opacity (lerp target)
   let lastKickImpact = -10;
   let lastDrumMinorImpact = -10;
   // Per-drum-type impact timestamps for distinct visual treatments
@@ -4012,7 +4025,7 @@ import { initMidiPlayer } from './midi-player.js';
     else if (has(4) && has(7)) { quality = ''; sub = 'MAJOR'; }
     else if (has(3) && has(7)) { quality = 'm'; sub = 'MINOR'; }
     else if (has(7)) { quality = '5'; sub = 'POWER'; }
-    else { quality = '?'; sub = intervals.map(v => v + 'ST').join(' '); }
+    else { return null; }
     return { name: rootName + quality, sub: sub };
   }
 
@@ -4118,6 +4131,8 @@ import { initMidiPlayer } from './midi-player.js';
     orbitEl.id = 'y2k-orbit';
     orbitEl.innerHTML = '<svg viewBox="0 0 64 64"><g id="y2k-orbit-group"><circle id="y2k-orbit-ring" cx="32" cy="32" r="28"/><circle class="y2k-orbit-dot" cx="32" cy="4" r="2"/><circle class="y2k-orbit-dot" cx="60" cy="32" r="1.5"/><circle class="y2k-orbit-dot" cx="32" cy="60" r="1.2"/></g></svg>';
     document.body.appendChild(orbitEl);
+    orbitRingRef = orbitEl.querySelector('#y2k-orbit-ring');
+    orbitDotRefs = orbitEl.querySelectorAll('.y2k-orbit-dot');
   }
 
   function createFreqLabel() {
@@ -4153,9 +4168,373 @@ import { initMidiPlayer } from './midi-player.js';
     }
   }
 
+  function createConstellation() {
+    constellationEl = document.createElement('div');
+    constellationEl.id = 'y2k-constellation';
+    constellationCanvas = document.createElement('canvas');
+    constellationCanvas.width = 480;
+    constellationCanvas.height = 480;
+    constellationEl.appendChild(constellationCanvas);
+    constellationCtx = constellationCanvas.getContext('2d');
+    document.body.appendChild(constellationEl);
+    window.addEventListener('mousemove', function(e) {
+      constellationMouseX = e.clientX;
+      constellationMouseY = e.clientY;
+    }, { passive: true });
+  }
+
+  function createBeatFlash() {
+    beatFlashEl = document.createElement('div');
+    // Fixed gradient — never rewritten. Only opacity changes via smooth JS lerp.
+    beatFlashEl.style.cssText = 'position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:0;mix-blend-mode:screen;background:radial-gradient(ellipse at center,rgba(255,255,255,0.45) 0%,rgba(200,220,255,0.15) 40%,rgba(0,0,0,0) 72%);will-change:opacity;contain:strict';
+    document.body.appendChild(beatFlashEl);
+  }
+
+  function drawConstellation(hueDeg, activeNotes, energy, impact, kick, now) {
+    var ctx = constellationCtx;
+    if (!ctx) return;
+    var W = 480, H = 480;
+    ctx.clearRect(0, 0, W, H);
+    var PI2 = Math.PI * 2;
+    var cx = W * 0.5, cy = H * 0.5;
+    // ── Aggressive beat scaling: ring SLAMS outward on kick ──
+    var baseR = 90 + energy * 18;
+    var impPulse = impact * 28;
+    var kickPunch = kick * 18;
+    var R = baseR + impPulse + kickPunch;
+    var isPlaying = activeNotes.length > 0;
+    // Beat-synced rotation: snaps forward on each kick
+    var rotOffset = isPlaying ? now * 0.008 + kick * 0.15 : now * 0.025;
+
+    // ── Build active note set + velocity map ──
+    var activeSet = new Set();
+    var velMap = {};
+    for (var ai = 0; ai < activeNotes.length; ai++) {
+      var pc = activeNotes[ai].midi % 12;
+      activeSet.add(pc);
+      velMap[pc] = Math.max(velMap[pc] || 0, activeNotes[ai].velocity || 0.7);
+    }
+
+    // ── Update afterglow (faster decay for punchy feel) ──
+    for (var fi = 0; fi < 12; fi++) {
+      if (activeSet.has(fi)) constellationFade[fi] = 1.0;
+      else if (constellationFade[fi] > 0.01) constellationFade[fi] *= 0.88;
+      else constellationFade[fi] = 0;
+    }
+
+    // ── Mouse warp ──
+    var rect = constellationEl.getBoundingClientRect();
+    var elCx = rect.left + rect.width * 0.5;
+    var elCy = rect.top + rect.height * 0.5;
+    var mdx = constellationMouseX - elCx;
+    var mdy = constellationMouseY - elCy;
+    var mDist = Math.sqrt(mdx * mdx + mdy * mdy);
+    var warpFactor = mDist < 300 ? (300 - mDist) / 300 * 0.25 : 0;
+    var mlx = (constellationMouseX - rect.left) / rect.width * W;
+    var mly = (constellationMouseY - rect.top) / rect.height * H;
+
+    // ── L0: Beat flash — full canvas white flash on strong kicks ──
+    if (kick > 0.4) {
+      ctx.fillStyle = 'hsla(' + hueDeg + ',90%,95%,' + ((kick - 0.4) * 0.12).toFixed(3) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // ── L1: Background energy field ──
+    if (energy > 0.03 || impact > 0.05) {
+      var bgGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R + 60);
+      bgGrad.addColorStop(0, 'hsla(' + hueDeg + ',80%,60%,' + (energy * 0.12 + impact * 0.10).toFixed(3) + ')');
+      bgGrad.addColorStop(0.5, 'hsla(' + hueDeg + ',60%,50%,' + (energy * 0.05 + impact * 0.04).toFixed(3) + ')');
+      bgGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // ── L2: Double rotating HUD rings ──
+    ctx.save();
+    ctx.translate(cx, cy);
+    // Outer ring — counter-rotates, snaps on beat
+    ctx.rotate(now * -0.02 - kick * 0.2);
+    ctx.beginPath();
+    ctx.arc(0, 0, R + 24, 0, PI2);
+    ctx.strokeStyle = 'hsla(' + hueDeg + ',45%,78%,' + (0.06 + impact * 0.18).toFixed(2) + ')';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 10]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Inner accent ring — rotates opposite
+    ctx.rotate(now * 0.06 + kick * 0.3);
+    ctx.beginPath();
+    ctx.arc(0, 0, R + 12, 0, PI2);
+    ctx.strokeStyle = 'hsla(' + ((hueDeg + 60) % 360) + ',40%,72%,' + (0.04 + impact * 0.10).toFixed(2) + ')';
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([2, 14]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // ── Compute node positions ──
+    var nodes = [];
+    for (var i = 0; i < 12; i++) {
+      var angle = i * (PI2 / 12) - Math.PI * 0.5 + rotOffset;
+      // Per-node jitter, amplified by beat
+      var jitter = isPlaying ? Math.sin(now * 4.5 + i * 2.1) * (energy * 6 + kick * 10) : 0;
+      var nr = R + jitter;
+      var nx = cx + nr * Math.cos(angle);
+      var ny = cy + nr * Math.sin(angle);
+      if (warpFactor > 0) {
+        nx += (mlx - cx) * warpFactor;
+        ny += (mly - cy) * warpFactor;
+      }
+      nodes.push({ x: nx, y: ny, active: activeSet.has(i), angle: angle, vel: velMap[i] || 0, fade: constellationFade[i] });
+    }
+
+    // ── L3: Ambient particles (burst outward on kick) ──
+    if (!constellationParticles) {
+      constellationParticles = [];
+      for (var pp = 0; pp < 14; pp++) {
+        constellationParticles.push({ a: Math.random() * PI2, r: Math.random() * 0.6 + 0.2, speed: (Math.random() - 0.5) * 0.004, drift: Math.random() * 0.002 });
+      }
+    }
+    ctx.globalAlpha = 0.3 + energy * 0.4 + kick * 0.2;
+    for (var pi = 0; pi < 14; pi++) {
+      var pt = constellationParticles[pi];
+      pt.a += pt.speed + energy * 0.012 + kick * 0.04;
+      pt.r += pt.drift + kick * 0.02;
+      if (pt.r > 0.92) { pt.drift = -Math.abs(pt.drift); pt.r = 0.92; }
+      if (pt.r < 0.08) { pt.drift = Math.abs(pt.drift); pt.r = 0.08; }
+      var pRadius = R * pt.r;
+      var px = cx + pRadius * Math.cos(pt.a + rotOffset);
+      var py = cy + pRadius * Math.sin(pt.a + rotOffset);
+      var pSize = 1.5 + energy * 2 + kick * 3;
+      ctx.beginPath();
+      ctx.arc(px, py, pSize, 0, PI2);
+      ctx.fillStyle = 'hsla(' + ((hueDeg + pi * 25) % 360) + ',55%,82%,0.55)';
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // ── L4: Radial tick marks — pulse height on beat ──
+    var tickExt = 6 + impact * 12 + kick * 8;
+    for (var ti = 0; ti < 12; ti++) {
+      var ta = nodes[ti].angle;
+      var tFade = nodes[ti].fade;
+      var tActive = tFade > 0.5;
+      var tickInner = R - 10 - (tActive ? tickExt * 0.5 : 0);
+      var tickOuter = R + 6 + (tActive ? tickExt : 0);
+      ctx.beginPath();
+      ctx.moveTo(cx + tickInner * Math.cos(ta), cy + tickInner * Math.sin(ta));
+      ctx.lineTo(cx + tickOuter * Math.cos(ta), cy + tickOuter * Math.sin(ta));
+      ctx.strokeStyle = tActive
+        ? 'hsla(' + hueDeg + ',75%,88%,' + (0.4 + tFade * 0.5 + impact * 0.1).toFixed(2) + ')'
+        : 'hsla(' + hueDeg + ',25%,65%,' + Math.max(0.06, tFade * 0.35).toFixed(2) + ')';
+      ctx.lineWidth = tActive ? 3 : 1;
+      ctx.stroke();
+    }
+
+    // ── L5: Harmonic arcs + polygon ──
+    var activeIdxs = [];
+    for (var j = 0; j < 12; j++) {
+      if (nodes[j].active) activeIdxs.push(j);
+    }
+    if (activeIdxs.length >= 2) {
+      ctx.lineCap = 'round';
+      for (var a = 0; a < activeIdxs.length; a++) {
+        for (var b = a + 1; b < activeIdxs.length; b++) {
+          var na = nodes[activeIdxs[a]], nb = nodes[activeIdxs[b]];
+          var interval = Math.abs(activeIdxs[b] - activeIdxs[a]);
+          if (interval > 6) interval = 12 - interval;
+          var tension = interval / 6;
+          var mx = (na.x + nb.x) * 0.5, my = (na.y + nb.y) * 0.5;
+          var perpX = -(nb.y - na.y), perpY = nb.x - na.x;
+          var pLen = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
+          var dir = ((a + b) & 1) ? 1 : -1;
+          var curveAmt = tension * 0.4 * dir;
+          var cpx = mx + perpX / pLen * curveAmt * R;
+          var cpy = my + perpY / pLen * curveAmt * R;
+          // Glow
+          ctx.beginPath();
+          ctx.moveTo(na.x, na.y);
+          ctx.quadraticCurveTo(cpx, cpy, nb.x, nb.y);
+          ctx.strokeStyle = 'hsla(' + ((hueDeg + 180) % 360) + ',75%,78%,' + (0.08 + impact * 0.12).toFixed(2) + ')';
+          ctx.lineWidth = 8 + impact * 4;
+          ctx.stroke();
+          // Core
+          ctx.beginPath();
+          ctx.moveTo(na.x, na.y);
+          ctx.quadraticCurveTo(cpx, cpy, nb.x, nb.y);
+          ctx.strokeStyle = 'hsla(' + ((hueDeg + 180) % 360) + ',68%,85%,' + (0.45 + impact * 0.25).toFixed(2) + ')';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+      }
+      ctx.lineCap = 'butt';
+
+      // Polygon fill — brighter on beat
+      if (activeIdxs.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(nodes[activeIdxs[0]].x, nodes[activeIdxs[0]].y);
+        for (var pk = 1; pk < activeIdxs.length; pk++) ctx.lineTo(nodes[activeIdxs[pk]].x, nodes[activeIdxs[pk]].y);
+        ctx.closePath();
+        ctx.fillStyle = 'hsla(' + hueDeg + ',65%,68%,' + (0.03 + impact * 0.08 + kick * 0.05).toFixed(3) + ')';
+        ctx.fill();
+      }
+    }
+
+    // ── L6: Nodes ──
+    for (var k = 0; k < 12; k++) {
+      var nd = nodes[k];
+      var fade = nd.fade;
+      if (nd.active) {
+        // Beat-scaled glow layers
+        var beatScale = 1 + impact * 0.6 + kick * 0.4;
+        // L1: wide glow
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, (20 + nd.vel * 8) * beatScale, 0, PI2);
+        ctx.fillStyle = 'hsla(' + hueDeg + ',85%,78%,' + (0.06 + kick * 0.04).toFixed(3) + ')';
+        ctx.fill();
+        // L2: mid glow
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, (10 + nd.vel * 4) * beatScale, 0, PI2);
+        ctx.fillStyle = 'hsla(' + hueDeg + ',82%,82%,' + (0.16 + impact * 0.10).toFixed(2) + ')';
+        ctx.fill();
+        // L3: core
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, (5 + nd.vel * 2) * beatScale, 0, PI2);
+        ctx.fillStyle = 'hsla(' + hueDeg + ',78%,95%,0.95)';
+        ctx.fill();
+      } else if (fade > 0.02) {
+        // Afterglow trail
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, 14 * fade, 0, PI2);
+        ctx.fillStyle = 'hsla(' + hueDeg + ',60%,75%,' + (fade * 0.10).toFixed(3) + ')';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, 4 + fade * 3, 0, PI2);
+        ctx.fillStyle = 'hsla(' + hueDeg + ',55%,85%,' + (fade * 0.55).toFixed(3) + ')';
+        ctx.fill();
+      } else {
+        // Mouse proximity
+        var nsx = rect.left + nd.x / W * rect.width;
+        var nsy = rect.top + nd.y / H * rect.height;
+        var ndx2 = constellationMouseX - nsx, ndy2 = constellationMouseY - nsy;
+        var nodeDist = Math.sqrt(ndx2 * ndx2 + ndy2 * ndy2);
+        var proxAlpha = nodeDist < 100 ? 0.10 + (100 - nodeDist) / 100 * 0.40 : 0.10;
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, nodeDist < 100 ? 4 : 2, 0, PI2);
+        ctx.fillStyle = 'hsla(' + hueDeg + ',35%,75%,' + proxAlpha.toFixed(2) + ')';
+        ctx.fill();
+      }
+    }
+
+    // ── L7: Note labels ──
+    var labelNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    ctx.font = '600 16px "Lucida Console", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (var li = 0; li < 12; li++) {
+      var lFade = nodes[li].fade;
+      var showLabel = lFade > 0.1 || mDist < 220;
+      if (!showLabel) continue;
+      var lAngle = nodes[li].angle;
+      var lR = R + 30;
+      var lx = cx + lR * Math.cos(lAngle);
+      var ly = cy + lR * Math.sin(lAngle);
+      if (warpFactor > 0) { lx += (mlx - cx) * warpFactor; ly += (mly - cy) * warpFactor; }
+      if (lFade > 0.5) {
+        ctx.fillStyle = 'hsla(' + hueDeg + ',75%,94%,' + Math.min(0.95, 0.4 + lFade * 0.55).toFixed(2) + ')';
+      } else if (mDist < 220) {
+        var labelAlpha = Math.min(0.45, (220 - mDist) / 220 * 0.45);
+        ctx.fillStyle = 'hsla(' + hueDeg + ',25%,72%,' + Math.max(labelAlpha, lFade * 0.5).toFixed(2) + ')';
+      } else {
+        ctx.fillStyle = 'hsla(' + hueDeg + ',35%,78%,' + (lFade * 0.5).toFixed(2) + ')';
+      }
+      ctx.fillText(labelNames[li], lx, ly);
+    }
+
+    // ── L8: Center root note ──
+    if (isPlaying && activeNotes.length > 0) {
+      var rootPc = activeNotes[0].midi % 12;
+      // Glow circle
+      ctx.beginPath();
+      ctx.arc(cx, cy - 4, 30 + impact * 10, 0, PI2);
+      ctx.fillStyle = 'hsla(' + hueDeg + ',65%,72%,' + (0.05 + impact * 0.06).toFixed(3) + ')';
+      ctx.fill();
+      ctx.font = '200 42px "Lucida Console", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'hsla(' + hueDeg + ',55%,96%,' + (0.7 + impact * 0.3).toFixed(2) + ')';
+      ctx.fillText(labelNames[rootPc], cx, cy - 8);
+      ctx.font = '400 12px "Lucida Console", monospace';
+      ctx.fillStyle = 'hsla(' + hueDeg + ',40%,82%,' + (0.3 + impact * 0.15).toFixed(2) + ')';
+      ctx.fillText('OCT' + (Math.floor(activeNotes[0].midi / 12) - 1), cx, cy + 18);
+    }
+
+    // ── L9: Shockwave rings (bigger, more dramatic) ──
+    if (constellationShockwave > 0) {
+      for (var sw = 0; sw < 4; sw++) {
+        var swR = constellationShockwave - sw * 10;
+        if (swR <= 0) continue;
+        var swAlpha = (1 - swR / 80) * (1 - sw * 0.25);
+        if (swAlpha <= 0) continue;
+        ctx.beginPath();
+        ctx.arc(cx, cy, swR * 2.8, 0, PI2);
+        ctx.strokeStyle = 'hsla(' + hueDeg + ',85%,88%,' + (swAlpha * 0.55).toFixed(3) + ')';
+        ctx.lineWidth = 2.5 - sw * 0.5;
+        ctx.stroke();
+      }
+    }
+
+    // ── L10: Main ring (beat-reactive width + brightness) ──
+    var ringAlpha = 0.10 + Math.sin(now * 0.8) * 0.03 + impact * 0.18 + kick * 0.10;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, PI2);
+    ctx.strokeStyle = 'hsla(' + hueDeg + ',45%,78%,' + ringAlpha.toFixed(3) + ')';
+    ctx.lineWidth = 1.5 + impact * 2;
+    ctx.stroke();
+
+    // ── L11: Energy spokes on strong beats ──
+    if (impact > 0.3) {
+      var spokeAlpha = (impact - 0.3) * 0.5;
+      for (var si = 0; si < 6; si++) {
+        var sAngle = si * (PI2 / 6) + now * 0.1;
+        var sInner = R * 0.3;
+        var sOuter = R + impact * 20;
+        ctx.beginPath();
+        ctx.moveTo(cx + sInner * Math.cos(sAngle), cy + sInner * Math.sin(sAngle));
+        ctx.lineTo(cx + sOuter * Math.cos(sAngle), cy + sOuter * Math.sin(sAngle));
+        ctx.strokeStyle = 'hsla(' + ((hueDeg + 90) % 360) + ',60%,80%,' + (spokeAlpha * 0.15).toFixed(3) + ')';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+
+    // ── L12: Mouse beam + crosshair ──
+    if (mDist < 200 && warpFactor > 0) {
+      var beamGrad = ctx.createLinearGradient(cx, cy, mlx, mly);
+      beamGrad.addColorStop(0, 'hsla(' + hueDeg + ',60%,82%,' + (warpFactor * 0.6).toFixed(3) + ')');
+      beamGrad.addColorStop(1, 'transparent');
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(mlx, mly);
+      ctx.strokeStyle = beamGrad;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      var chSize = 8;
+      ctx.strokeStyle = 'hsla(' + hueDeg + ',50%,88%,' + Math.min(1, warpFactor * 2).toFixed(3) + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(mlx - chSize, mly); ctx.lineTo(mlx + chSize, mly);
+      ctx.moveTo(mlx, mly - chSize); ctx.lineTo(mlx, mly + chSize);
+      ctx.stroke();
+    }
+  }
+
   function midiToFreq(midi) {
     return 440 * Math.pow(2, (midi - 69) / 12);
   }
+
+
+
 
   function updateDatastreamContent() {
     if (!datastreamInnerEl) return;
@@ -6688,10 +7067,25 @@ import { initMidiPlayer } from './midi-player.js';
   // (3) Mic (time-domain RMS, smoothed, gated) → micVisual → bloom, warp, chromatic offset, particle attractor (subtle).
   // (4) Mouse/touch velocity → touchIntensity → warp, spiral, glitch. Head tracking → camera yaw + kaleido rotation.
   // (5) Chord (multiple keys) → blend KEY_PROFILES; 3+ keys = sparkle; 5+ = pad swell. All lerped for smooth transitions.
+
+  // Hoisted outside animate to avoid per-frame function object allocation
+  function _doRollOverlay(now) {
+    if (!rollOverlayScene || !rollOverlayCamera || !roll3DGroup) return;
+    rollOverlayCamera.position.x = 0.0;
+    rollOverlayCamera.position.y = 0.008 * Math.sin(now * 0.2 + 0.5);
+    rollOverlayCamera.position.z = 4.35 + 0.05 * Math.sin(now * 0.13 + 0.9);
+    rollOverlayCamera.lookAt(0, -0.12, -1.9);
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    renderer.render(rollOverlayScene, rollOverlayCamera);
+    renderer.autoClear = true;
+  }
+
   function animate() {
     requestAnimationFrame(animate);
     if (!renderer || !scene || !camera) return;
-    const now = performance.now() * 0.001;
+    var _frameStart = performance.now();
+    const now = _frameStart * 0.001;
     time = now;
     const syncA = Math.sin(now * 0.45);
     const syncB = Math.sin(now * 0.38 + 1.0);
@@ -6734,8 +7128,8 @@ import { initMidiPlayer } from './midi-player.js';
     }
 
     const dblFlash = Math.max(0, 1 - (now - lastDoubleTap) / 0.4);
-    const kickFlash = Math.pow(Math.max(0, 1 - (now - lastKickImpact) / 0.16), 0.24);
-    const minorDrumFlash = Math.pow(Math.max(0, 1 - (now - lastDrumMinorImpact) / 0.1), 0.64) * 0.2;
+    const kickFlash = Math.pow(Math.max(0, 1 - (now - lastKickImpact) / 0.18), 0.22);
+    const minorDrumFlash = Math.pow(Math.max(0, 1 - (now - lastDrumMinorImpact) / 0.11), 0.58) * 0.25;
     const impactFlash = clamp01(kickFlash + minorDrumFlash);
     // Mic: smoothed + gated, scaled for intuitive visual range (not overwhelming)
     const micVisual = micVisualCurve(micLevelSmoothed);
@@ -7563,24 +7957,27 @@ import { initMidiPlayer } from './midi-player.js';
     if (!freqLabelEl) createFreqLabel();
     if (!polycountEl) createPolycount();
     if (!tickerBars.length) createTickerBars();
+    if (!constellationEl) createConstellation();
 
     // ═══ Y2K HUD: OPTIMIZED per-frame updates ═══
     // Strategy: batch reads, skip unchanged, reuse buffers, reduce DOM writes
+    // frameBudgetOver > 10 → skip decorative elements to reclaim ms
     {
       const hueDeg = Math.round(currentKeyHue * 360) % 360;
       const isPlaying = keysPressed.size > 0 || midiPlaybackActive;
       const activeNotes = collectOrderedActiveNotes();
       const noteCount = activeNotes.length;
-      // Frame counter for throttled updates (skip every other frame for heavy ops)
       const y2kFrame = Math.floor(now * 60);
       const isEvenFrame = (y2kFrame & 1) === 0;
+      const isThrottled = frameBudgetOver > 10; // under pressure — skip decorative
 
-      // ── Bracket frame (update every frame — cheap, 1 parent opacity + transform) ──
-      bracketFrameEl.style.opacity = Math.min(0.95, 0.35 + impactFlash * 0.45 + 0.08 * (0.5 + 0.5 * syncA));
-      if (impactFlash > 0.3) {
-        const jx = (Math.random() - 0.5) * 4;
-        const s = 1.0 + impactFlash * 0.06;
-        bracketFrameEl.style.transform = 'scale(' + s + ') translateX(' + jx + 'px)';
+      // ── Bracket frame — punchy scale burst + shake ──
+      bracketFrameEl.style.opacity = Math.min(1.0, 0.25 + impactFlash * 0.60 + kickFlash * 0.20 + 0.06 * (0.5 + 0.5 * syncA));
+      if (impactFlash > 0.25) {
+        const jx = (Math.random() - 0.5) * (6 + kickFlash * 10);
+        const jy = (Math.random() - 0.5) * (3 + kickFlash * 5);
+        const s = 1.0 + impactFlash * 0.10 + kickFlash * 0.05;
+        bracketFrameEl.style.transform = 'scale(' + s + ') translate(' + jx + 'px,' + jy + 'px)';
       } else {
         bracketFrameEl.style.transform = '';
       }
@@ -7590,32 +7987,33 @@ import { initMidiPlayer } from './midi-player.js';
         for (let i = 0; i < 4; i++) bracketFrameEl.children[i].style.borderColor = bc;
       }
 
-      // ── Crosshairs (container opacity only — children use CSS animation) ──
-      crosshairEl.style.opacity = isPlaying ? 0.45 + impactFlash * 0.4 : 0.12;
+      // ── Crosshairs — flash on kick (opacity only, no filter) ──
+      crosshairEl.style.opacity = isPlaying ? Math.min(1.0, 0.35 + impactFlash * 0.55 + kickFlash * 0.25) : 0.10;
 
-      // ── Scanline (1 write) ──
-      scanlineEl.style.opacity = 0.55 + impactFlash * 0.4;
+      // ── Scanline (throttled to even frames) ──
+      if (isEvenFrame) scanlineEl.style.opacity = Math.min(1.0, 0.45 + impactFlash * 0.50 + kickFlash * 0.12);
 
-      // ── Datastream (1 opacity write + CA only on beat) ──
-      datastreamEl.style.opacity = Math.min(0.7, 0.32 + audioEnergy * 0.25 + impactFlash * 0.18);
+      // ── Datastream (throttled to even frames) ──
+      if (isEvenFrame) datastreamEl.style.opacity = Math.min(0.90, 0.25 + audioEnergy * 0.32 + impactFlash * 0.28 + kickFlash * 0.10);
 
-      // ── Gradient corners (throttle color to every 3rd frame — blur is very static) ──
-      gradientCornersEl.style.opacity = Math.min(0.2, 0.06 + impactFlash * 0.07 + audioEnergy * 0.05);
-      if (y2kFrame % 3 === 0) {
+      // ── Gradient corners (flash hard on beat) ──
+      if (!isThrottled) gradientCornersEl.style.opacity = Math.min(0.50, 0.08 + impactFlash * 0.25 + kickFlash * 0.18 + audioEnergy * 0.10);
+      if (!isThrottled && y2kFrame % 3 === 0) {
         gradientCornersEl.children[0].style.color = 'hsl(' + hueDeg + ',60%,72%)';
         gradientCornersEl.children[1].style.color = 'hsl(' + ((hueDeg + 180) % 360) + ',55%,66%)';
       }
 
-      // ── Spectrum analyzer (5 bars — height only, background throttled) ──
-      if (specBars.length) {
-        spectrumEl.style.opacity = Math.min(0.85, 0.35 + audioEnergy * 0.4 + impactFlash * 0.15);
+      // ── Spectrum analyzer (throttled to even frames) ──
+      if (isEvenFrame && specBars.length) {
+        spectrumEl.style.opacity = Math.min(1.0, 0.40 + audioEnergy * 0.42 + impactFlash * 0.30 + kickFlash * 0.15);
         const bl = bassLevel, ml = midLevel, tl = trebleLevel;
+        const beatBoost = impactFlash * 28 + kickFlash * 18;
         const bins0 = bl, bins1 = (bl + ml) * 0.5, bins2 = ml, bins3 = (ml + tl) * 0.5, bins4 = tl;
-        specBars[0].style.height = Math.max(3, (bins0 * 46 + impactFlash * 12) | 0) + 'px';
-        specBars[1].style.height = Math.max(3, (bins1 * 46 + impactFlash * 12) | 0) + 'px';
-        specBars[2].style.height = Math.max(3, (bins2 * 46 + impactFlash * 12) | 0) + 'px';
-        specBars[3].style.height = Math.max(3, (bins3 * 46 + impactFlash * 12) | 0) + 'px';
-        specBars[4].style.height = Math.max(3, (bins4 * 46 + impactFlash * 12) | 0) + 'px';
+        specBars[0].style.height = Math.max(3, (bins0 * 62 + beatBoost) | 0) + 'px';
+        specBars[1].style.height = Math.max(3, (bins1 * 62 + beatBoost * 0.8) | 0) + 'px';
+        specBars[2].style.height = Math.max(3, (bins2 * 62 + beatBoost * 0.6) | 0) + 'px';
+        specBars[3].style.height = Math.max(3, (bins3 * 62 + beatBoost * 0.8) | 0) + 'px';
+        specBars[4].style.height = Math.max(3, (bins4 * 62 + beatBoost) | 0) + 'px';
         // Color update throttled to every 4th frame
         if (y2kFrame % 4 === 0) {
           for (let i = 0; i < 5; i++) {
@@ -7653,7 +8051,7 @@ import { initMidiPlayer } from './midi-player.js';
           label = 'SYNC';
         }
         arcFgEl.style.strokeDashoffset = (circ * (1 - pct)).toFixed(1);
-        arcEl.style.opacity = 0.4 + impactFlash * 0.35;
+        arcEl.style.opacity = Math.min(0.95, 0.42 + impactFlash * 0.40 + kickFlash * 0.12);
         // Text + color update throttled
         if (isEvenFrame) {
           arcLabelEl.textContent = label;
@@ -7661,35 +8059,38 @@ import { initMidiPlayer } from './midi-player.js';
         }
       }
 
-      // ── Breathing dots (1 parent opacity write) ──
-      dotsEl.style.opacity = Math.min(0.8, 0.22 + audioEnergy * 0.35 + impactFlash * 0.12);
+      // ── Breathing dots (skip under pressure) ──
+      if (!isThrottled) dotsEl.style.opacity = Math.min(0.9, 0.25 + audioEnergy * 0.40 + impactFlash * 0.20 + kickFlash * 0.08);
 
-      // ── System ID (1 opacity write, glitch text-shadow only on strong beat) ──
-      {
-        const sysAlpha = isPlaying ? '0.50' : '0.65';
-        sysIdEl.style.opacity = sysAlpha;
-        if (impactFlash > 0.45) {
-          const r = Math.random() * 3;
-          sysIdEl.style.textShadow = (2 + r) + 'px 0 rgba(255,50,80,0.35),' + (-2 - r) + 'px 0 rgba(50,200,255,0.35),0 0 10px rgba(120,180,255,0.18)';
+      // ── System ID (chromatic glitch on beat, throttled) ──
+      if (isEvenFrame) {
+        sysIdEl.style.opacity = Math.min(1.0, isPlaying ? 0.45 + impactFlash * 0.40 + kickFlash * 0.15 : 0.65);
+        if (impactFlash > 0.35) {
+          const r = Math.random() * (4 + kickFlash * 8);
+          sysIdEl.style.textShadow = (2 + r) + 'px 0 rgba(255,50,80,' + (0.35 + kickFlash * 0.3) + '),' + (-2 - r) + 'px 0 rgba(50,200,255,' + (0.35 + kickFlash * 0.3) + '),0 0 ' + (10 + impactFlash * 14) + 'px rgba(120,180,255,0.25)';
+        } else if (impactFlash < 0.05) {
+          sysIdEl.style.textShadow = '';
         }
       }
 
-      // ── CRT Noise (1 opacity write, throttled) ──
+      // ── CRT Noise (throttled) ──
       if (isEvenFrame) {
-        noiseEl.style.opacity = 0.04 + impactFlash * 0.07;
+        noiseEl.style.opacity = 0.05 + impactFlash * 0.10 + kickFlash * 0.05;
       }
 
-      // ── Glitch bar (event-driven, not per-frame) ──
+      // ── Glitch bar (on strong beat only) ──
       glitchBarTimer -= 0.016;
-      if (impactFlash > 0.45 && glitchBarTimer <= 0 && Math.random() < 0.45) {
-        glitchBarEl.style.cssText = 'position:fixed;left:0;right:0;z-index:1392;pointer-events:none;mix-blend-mode:screen;background:rgba(255,255,255,0.08);top:' + (Math.random() * 80 + 10) + '%;height:' + (2 + Math.random() * 8) + 'px;opacity:' + (0.06 + Math.random() * 0.14) + ';transform:translateX(' + ((Math.random() - 0.5) * 10) + 'px)';
-        glitchBarTimer = 0.06 + Math.random() * 0.1;
+      if (impactFlash > 0.35 && glitchBarTimer <= 0 && Math.random() < 0.50) {
+        const gH = 2 + Math.random() * 14 + kickFlash * 10;
+        const gO = 0.10 + Math.random() * 0.20 + kickFlash * 0.15;
+        glitchBarEl.style.cssText = 'position:fixed;left:0;right:0;z-index:1392;pointer-events:none;mix-blend-mode:screen;background:rgba(255,255,255,' + (0.08 + kickFlash * 0.08) + ');top:' + (Math.random() * 80 + 10) + '%;height:' + gH + 'px;opacity:' + gO + ';transform:translateX(' + ((Math.random() - 0.5) * (10 + kickFlash * 16)) + 'px)';
+        glitchBarTimer = 0.05 + Math.random() * 0.08;
       } else if (glitchBarTimer <= 0 && glitchBarEl.style.height !== '0px') {
         glitchBarEl.style.opacity = '0';
         glitchBarEl.style.height = '0';
       }
 
-      // ── Velocity meter (2 writes: height + opacity) ──
+      // ── Velocity meter (height + opacity, beat-reactive) ──
       {
         let avgVel = 0;
         if (noteCount > 0) {
@@ -7697,8 +8098,9 @@ import { initMidiPlayer } from './midi-player.js';
           for (let i = 0; i < noteCount; i++) sum += (activeNotes[i].velocity || 0.7);
           avgVel = sum / noteCount;
         }
-        velocityFillEl.style.height = ((avgVel * 100) | 0) + '%';
-        velocityEl.style.opacity = isPlaying ? 0.5 + impactFlash * 0.3 : 0.15;
+        const velBoost = Math.min(1.0, avgVel + impactFlash * 0.15 + kickFlash * 0.10);
+        velocityFillEl.style.height = ((velBoost * 100) | 0) + '%';
+        velocityEl.style.opacity = isPlaying ? 0.55 + impactFlash * 0.35 + kickFlash * 0.10 : 0.15;
         // Gradient color throttled to every 6th frame (expensive to parse)
         if (y2kFrame % 6 === 0) {
           velocityFillEl.style.background = 'linear-gradient(0deg,hsla(' + hueDeg + ',60%,55%,0.6),hsla(' + ((hueDeg + 40) % 360) + ',70%,75%,0.8))';
@@ -7725,16 +8127,16 @@ import { initMidiPlayer } from './midi-player.js';
         }
       }
 
-      // ── Waveform (throttled to every 2nd frame, reuse buffer, NO shadow) ──
-      if (isEvenFrame && waveformCtx && analyser) {
+      // ── Waveform (throttled to every 2nd frame, skip under pressure) ──
+      if (isEvenFrame && !isThrottled && waveformCtx && analyser) {
         var bufLen = analyser.fftSize;
         if (!waveformCtx._buf || waveformCtx._buf.length !== bufLen) {
           waveformCtx._buf = new Uint8Array(bufLen);
         }
         analyser.getByteTimeDomainData(waveformCtx._buf);
         waveformCtx.clearRect(0, 0, 80, 140);
-        waveformCtx.strokeStyle = 'hsla(' + hueDeg + ',50%,75%,0.5)';
-        waveformCtx.lineWidth = 1.5;
+        waveformCtx.strokeStyle = 'hsla(' + hueDeg + ',60%,82%,' + (0.5 + impactFlash * 0.45 + kickFlash * 0.20) + ')';
+        waveformCtx.lineWidth = 1.5 + kickFlash * 4;
         waveformCtx.beginPath();
         var step = Math.max(2, (bufLen / 70) | 0);
         for (var wi = 0; wi < 70; wi++) {
@@ -7744,20 +8146,18 @@ import { initMidiPlayer } from './midi-player.js';
           else waveformCtx.lineTo(x, wi * 2);
         }
         waveformCtx.stroke();
-        waveformEl.style.opacity = isPlaying ? 0.35 + audioEnergy * 0.35 : 0.12;
+        waveformEl.style.opacity = isPlaying ? Math.min(1.0, 0.40 + audioEnergy * 0.35 + impactFlash * 0.30 + kickFlash * 0.15) : 0.12;
       }
 
-      // ── Edge lines (1 parent opacity write only) ──
-      edgeLinesEl.style.opacity = Math.min(0.7, 0.2 + impactFlash * 0.35 + audioEnergy * 0.1);
+      // ── Edge lines (throttled to even frames) ──
+      if (isEvenFrame) edgeLinesEl.style.opacity = Math.min(0.85, 0.20 + impactFlash * 0.45 + kickFlash * 0.18 + audioEnergy * 0.12);
 
-      // ── Orbit ring (1 parent opacity, color throttled) ──
-      orbitEl.style.opacity = 0.25 + audioEnergy * 0.3 + impactFlash * 0.15;
-      if (y2kFrame % 8 === 0) {
-        var orRing = orbitEl.querySelector('#y2k-orbit-ring');
-        if (orRing) orRing.style.stroke = 'hsla(' + hueDeg + ',35%,70%,0.15)';
-        var orDots = orbitEl.querySelectorAll('.y2k-orbit-dot');
+      // ── Orbit ring (throttled to even frames, cached refs) ──
+      if (isEvenFrame) orbitEl.style.opacity = Math.min(0.80, 0.25 + audioEnergy * 0.30 + impactFlash * 0.25 + kickFlash * 0.12);
+      if (y2kFrame % 8 === 0 && orbitRingRef) {
+        orbitRingRef.style.stroke = 'hsla(' + hueDeg + ',35%,70%,0.15)';
         var dotFill = 'hsla(' + hueDeg + ',55%,80%,0.65)';
-        for (var od = 0; od < orDots.length; od++) orDots[od].style.fill = dotFill;
+        for (var od = 0; od < orbitDotRefs.length; od++) orbitDotRefs[od].style.fill = dotFill;
       }
 
       // ── Frequency label (event-driven, only on note change) ──
@@ -7772,21 +8172,22 @@ import { initMidiPlayer } from './midi-player.js';
         freqLabelEl.style.opacity = '0';
       }
 
-      // ── Polyphony count (event-driven) ──
+      // ── Polyphony count (beat-reactive) ──
       if (noteCount > 0) {
         polycountEl.childNodes[0].textContent = noteCount;
-        polycountEl.style.opacity = 0.4 + impactFlash * 0.3;
+        polycountEl.style.opacity = Math.min(0.95, 0.45 + impactFlash * 0.35 + kickFlash * 0.12);
       } else if (polycountEl.style.opacity !== '0') {
         polycountEl.style.opacity = '0';
       }
 
-      // ── Ticker bars (throttled to every 2nd frame) ──
-      if (isEvenFrame && tickerBars.length) {
+      // ── Ticker bars (throttled, skip under pressure) ──
+      if (isEvenFrame && !isThrottled && tickerBars.length) {
         var tBands = [bassLevel, bassLevel * 0.7 + midLevel * 0.3, midLevel, midLevel * 0.5 + trebleLevel * 0.5, trebleLevel, trebleLevel * 0.8];
+        var tkBeat = impactFlash * 18 + kickFlash * 12;
         for (var ti = 0; ti < 6; ti++) {
           var tkLv = tBands[ti];
-          tickerBars[ti].style.width = (6 + tkLv * 22 + impactFlash * 8 | 0) + 'px';
-          tickerBars[ti].style.opacity = 0.15 + tkLv * 0.45;
+          tickerBars[ti].style.width = (6 + tkLv * 30 + tkBeat | 0) + 'px';
+          tickerBars[ti].style.opacity = Math.min(0.85, 0.18 + tkLv * 0.48 + impactFlash * 0.18);
         }
         // Color update even less frequently
         if (y2kFrame % 12 === 0) {
@@ -7795,20 +8196,32 @@ import { initMidiPlayer } from './midi-player.js';
           }
         }
       }
+
+      // ── Constellation (every 2nd frame; every 4th when throttled) ──
+      if ((isThrottled ? (y2kFrame & 3) === 0 : isEvenFrame) && constellationCtx) {
+        if (kickFlash > 0.25 && constellationShockwave <= 0) constellationShockwave = 1;
+        drawConstellation(hueDeg, activeNotes, audioEnergy, impactFlash, kickFlash, now);
+        constellationEl.style.opacity = isPlaying ? Math.min(1.0, 0.70 + impactFlash * 0.30 + kickFlash * 0.15) : 0.4;
+        if (constellationShockwave > 0) constellationShockwave += 4;
+        if (constellationShockwave > 80) constellationShockwave = 0;
+      }
+
+      // ── Full-screen beat flash (smooth lerp fade) ──
+      if (!beatFlashEl) createBeatFlash();
+      {
+        const target = kickFlash > 0.3 ? kickFlash * 0.55 + impactFlash * 0.20 : 0;
+        // Smooth attack (fast) and release (gradual)
+        if (target > beatFlashLevel) {
+          beatFlashLevel += (target - beatFlashLevel) * 0.6;
+        } else {
+          beatFlashLevel *= 0.88; // smooth exponential decay
+          if (beatFlashLevel < 0.005) beatFlashLevel = 0;
+        }
+        beatFlashEl.style.opacity = beatFlashLevel;
+      }
     }
 
     try {
-      const renderRollOverlay = () => {
-        if (!rollOverlayScene || !rollOverlayCamera || !roll3DGroup) return;
-        rollOverlayCamera.position.x = 0.0;
-        rollOverlayCamera.position.y = 0.0 + 0.008 * Math.sin(now * 0.2 + 0.5);
-        rollOverlayCamera.position.z = 4.35 + 0.05 * Math.sin(now * 0.13 + 0.9);
-        rollOverlayCamera.lookAt(0, -0.12, -1.9);
-        renderer.autoClear = false;
-        renderer.clearDepth();
-        renderer.render(rollOverlayScene, rollOverlayCamera);
-        renderer.autoClear = true;
-      };
       if (postQuad && rtScene) {
         const pu = postQuad.material.uniforms;
         pu.tDiffuse.value = rtScene.texture;
@@ -7816,26 +8229,26 @@ import { initMidiPlayer } from './midi-player.js';
         pu.kaleidoFolds.value = currentKaleidoFolds;
         pu.kaleidoRotation.value = kaleidoRotation;
         pu.kaleidoMix.value = kaleidoMix;
-        pu.chromaticOffset.value = Math.min(0.012, activeProfile.ca + touchIntensity * 0.0008 + dblFlash * 0.0012 + bassHit * 0.001 + micVisual * 0.001 + styleLsd * 0.0011 + styleCrossover * 0.0007);
+        pu.chromaticOffset.value = Math.min(0.018, activeProfile.ca + touchIntensity * 0.0008 + dblFlash * 0.0012 + bassHit * 0.0015 + micVisual * 0.001 + styleLsd * 0.0011 + styleCrossover * 0.0007 + kickFlash * 0.005 + impactFlash * 0.003);
         const focusBreath = keysPressed.size === 0 ? 0.04 * Math.sin(now * 0.1) : 0;
         const idleBreath = idleIntensity * (0.06 * Math.sin(now * 0.15) + 0.04);
         pu.textureLayerMix.value = idleIntensity * 0.72;
-        pu.bloomStrength.value = Math.min(3.6, (activeProfile.bloom + dblFlash * 1.0 + touchIntensity * 0.4 + audioBoost * 0.8 + micVisual * 0.6 + focusBreath + idleBreath + gestureBloom + 0.05 * syncA + impactFlash * 0.35 + styleMuseum * 0.12 + styleCrossover * 0.10) * 0.7);
+        pu.bloomStrength.value = Math.min(3.8, (activeProfile.bloom + dblFlash * 1.0 + touchIntensity * 0.4 + audioBoost * 0.8 + micVisual * 0.6 + focusBreath + idleBreath + gestureBloom + 0.05 * syncA + impactFlash * 0.50 + kickFlash * 0.30 + styleMuseum * 0.12 + styleCrossover * 0.10) * 0.7);
         pu.spiralAmt.value = Math.min(0.2, curSpiral * 0.11 + touchIntensity * 0.012 + trebleLevel * 0.016 + gestureSpiral * 0.08 + 0.004 * syncB + styleLsd * 0.01);
         pu.flowAmt.value = Math.min(1.24, curFlow + touchIntensity * 0.07 + 0.03 * syncA + styleMuseum * 0.1);
-        pu.pulseAmt.value = Math.min(1.26, curPulse + midLevel * 0.12 + 0.022 * syncA + styleCrossover * 0.09);
+        pu.pulseAmt.value = Math.min(1.3, curPulse + midLevel * 0.12 + 0.022 * syncA + styleCrossover * 0.09 + kickFlash * 0.12);
         pu.shearAmt.value = Math.min(1.32, curShear + touchIntensity * 0.07 + 0.02 * syncB + styleMuseum * 0.06);
         pu.waveAmt.value = Math.min(1.32, curWave + trebleLevel * 0.14 + 0.026 * syncB + styleLsd * 0.12);
-        pu.glitchAmt.value = Math.min(0.95, curGlitch + dblFlash * 0.26 + bassHit * 0.18 + gestureGlitch * 0.88 + styleLsd * 0.14 + styleCrossover * 0.08 + audioEnergy * 0.05 + touchIntensity * 0.04 + kickFlash * 0.38);
+        pu.glitchAmt.value = Math.min(0.95, curGlitch + dblFlash * 0.26 + bassHit * 0.18 + gestureGlitch * 0.88 + styleLsd * 0.14 + styleCrossover * 0.08 + audioEnergy * 0.06 + touchIntensity * 0.04 + kickFlash * 0.42 + impactFlash * 0.10);
         pu.mirrorXY.value.set(curMirrorX, curMirrorY);
-        pu.warpAmt.value = Math.min(1.12, curWarp + touchIntensity * 0.1 + midLevel * 0.12 + micVisual * 0.18 + gestureWarp * 0.82 + 0.02 * syncA + styleCrossover * 0.12 + styleLsd * 0.08);
-        pu.contrastBoost.value = Math.min(2.6, Math.max(1.22, curContrast + 0.10 + dblFlash * 0.22 + impactFlash * 0.28 + bassHit * 0.16 + styleMuseum * 0.10 + styleCrossover * 0.10 + audioBoost * 0.06));
+        pu.warpAmt.value = Math.min(1.2, curWarp + touchIntensity * 0.1 + midLevel * 0.12 + micVisual * 0.18 + gestureWarp * 0.82 + 0.02 * syncA + styleCrossover * 0.12 + styleLsd * 0.08 + kickFlash * 0.10);
+        pu.contrastBoost.value = Math.min(2.8, Math.max(1.22, curContrast + 0.10 + dblFlash * 0.22 + impactFlash * 0.35 + kickFlash * 0.18 + bassHit * 0.16 + styleMuseum * 0.10 + styleCrossover * 0.10 + audioBoost * 0.06));
         pu.headLook.value.set(headOffset_g, headOffsetY);
         pu.themeHue.value = currentKeyHue;
         pu.prismAmt.value = Math.min(1.2, curPrism + styleCrossover * 0.16 + styleLsd * 0.08);
         pu.audioLevel.value = contourAudioLevel;
         pu.bioAmt.value = Math.min(1.0, curBio + styleCrossover * 0.12 + micVisual * 0.08);
-        pu.impactFlash.value = Math.min(1.0, impactFlash + dblFlash * 0.12 + bassHit * 0.06);
+        pu.impactFlash.value = Math.min(1.0, impactFlash + dblFlash * 0.12 + bassHit * 0.08 + kickFlash * 0.08);
         const pixelMixTarget = Math.min(1.0, PIXEL_MODE_VALUES[pixelModeIdx] * 0.9 + styleLsd * 0.07 + audioEnergy * 0.04);
         const analogMixTarget = Math.min(1.0, ANALOG_MODE_VALUES[analogModeIdx] * 0.92 + styleMuseum * 0.06 + midLevel * 0.04 + micVisual * 0.04);
         pu.pixelateMix.value += (pixelMixTarget - pu.pixelateMix.value) * 0.22;
@@ -7857,14 +8270,19 @@ import { initMidiPlayer } from './midi-player.js';
         renderer.render(scene, camera);
         renderer.setRenderTarget(null);
         renderer.render(postScene, postCamera);
-        renderRollOverlay();
+        _doRollOverlay(now);
       } else {
         renderer.render(scene, camera);
-        renderRollOverlay();
+        _doRollOverlay(now);
       }
     } catch (e) {
       console.warn('Render error:', e && e.message ? e.message : e);
     }
+
+    // ── Frame budget monitor: auto-throttle HUD when over 18ms ──
+    var _frameMs = performance.now() - _frameStart;
+    if (_frameMs > 18) frameBudgetOver = Math.min(frameBudgetOver + 2, 30);
+    else frameBudgetOver = Math.max(frameBudgetOver - 1, 0);
   }
   animate();
 
