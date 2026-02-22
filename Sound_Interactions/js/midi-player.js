@@ -151,9 +151,10 @@ export function initMidiPlayer(api) {
   container.setAttribute('aria-label', 'MIDI player');
   container.className = 'midi-player';
 
+  // Hidden file input (triggered programmatically from folder window)
   const fileLabel = document.createElement('label');
-  fileLabel.className = 'midi-player-label';
-  fileLabel.innerHTML = 'MIDI: <input type="file" accept=".mid,.midi" id="midi-file-input" class="midi-player-file">';
+  fileLabel.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none';
+  fileLabel.innerHTML = '<input type="file" accept=".mid,.midi" id="midi-file-input" class="midi-player-file">';
   container.appendChild(fileLabel);
 
   const controlRow = document.createElement('div');
@@ -218,12 +219,12 @@ export function initMidiPlayer(api) {
   btnWrap.className = 'midi-player-buttons';
   const playBtn = document.createElement('button');
   playBtn.type = 'button';
-  playBtn.textContent = 'Play';
+  playBtn.innerHTML = '<span class="midi-btn-icon midi-btn-play"></span> Play';
   playBtn.disabled = true;
   playBtn.className = 'midi-player-btn';
   const stopBtn = document.createElement('button');
   stopBtn.type = 'button';
-  stopBtn.textContent = 'Stop';
+  stopBtn.innerHTML = '<span class="midi-btn-icon midi-btn-stop"></span> Stop';
   stopBtn.disabled = true;
   stopBtn.className = 'midi-player-btn';
   btnWrap.appendChild(playBtn);
@@ -1651,6 +1652,7 @@ export function initMidiPlayer(api) {
   let liveMidiNotes = [];
   let lastPolyphony = 0;
   let sourceBpm = 120;
+  let sourceBeatsPerBar = 4;
   let tapBpm = 0;
   let tapTimes = [];
   let selectedTrackCount = 0;
@@ -1712,6 +1714,7 @@ export function initMidiPlayer(api) {
         position: nowSec,
         duration: totalDuration,
         bpm: sourceBpm,
+        beatsPerBar: sourceBeatsPerBar,
         selectedTracks: selectedTrackCount,
         totalTracks: totalTrackCount,
         polyphony: lastPolyphony,
@@ -2449,6 +2452,9 @@ export function initMidiPlayer(api) {
       : sourceBpm;
     sourceBpm = headerTempo && Number.isFinite(headerTempo) ? headerTempo : 120;
 
+    const headerTs = parsedMidi.header.timeSignatures && parsedMidi.header.timeSignatures[0];
+    sourceBeatsPerBar = (headerTs && headerTs.timeSignature && headerTs.timeSignature[0]) || 4;
+
     let maxEnd = 0;
     let noteCount = 0;
     parsedMidi.tracks.forEach(tr => {
@@ -2556,15 +2562,11 @@ export function initMidiPlayer(api) {
     positionMixerPanel();
   });
 
-  const fileInput = document.getElementById('midi-file-input');
-  fileInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  function loadMidiFromBuffer(arrayBuffer, fileName) {
     clearPlayback();
     tapTimes = [];
     tapBpm = 0;
     try {
-      const arrayBuffer = await file.arrayBuffer();
       parsedMidi = new Midi(arrayBuffer);
     } catch (err) {
       infoDiv.textContent = 'Parse error: ' + (err.message || err);
@@ -2582,7 +2584,6 @@ export function initMidiPlayer(api) {
         cb.name = 'midi-track';
         cb.value = i;
         cb.addEventListener('change', rebuildWaveFromSelection);
-        // Future-ready: clicking a track highlights its mixer channel
         label.addEventListener('click', () => {
           highlightMixerChannel(i);
         });
@@ -2608,6 +2609,14 @@ export function initMidiPlayer(api) {
     showProgressBar(!!parsedMidi);
     rebuildMixer();
     emitTransport();
+  }
+
+  const fileInput = document.getElementById('midi-file-input');
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    loadMidiFromBuffer(buf, file.name);
   });
 
   playBtn.addEventListener('click', () => {
@@ -2642,4 +2651,8 @@ export function initMidiPlayer(api) {
   // Initialize mixer panel (shows when MIDI is loaded)
   createMixerPanel();
   positionMixerPanel();
+
+  if (typeof api.registerMidiLoader === 'function') {
+    api.registerMidiLoader(loadMidiFromBuffer);
+  }
 }

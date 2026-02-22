@@ -99,7 +99,7 @@ html, body {
 }
 
 .ui-intro-hint {
-  font: 12px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  font: 12px/1.5 "Tahoma", "MS Sans Serif", "Segoe UI", sans-serif;
   color: rgba(255, 255, 255, 0.5);
   letter-spacing: 0.04em;
   text-align: center;
@@ -119,7 +119,7 @@ html, body {
   left: 50%;
   transform: translateX(-50%);
   z-index: 1001;
-  font: 11px/1.4 -apple-system, system-ui, sans-serif;
+  font: 11px/1.4 "Tahoma", "MS Sans Serif", "Segoe UI", sans-serif;
   font-weight: 500;
   letter-spacing: 0.05em;
   color: rgba(255, 255, 255, 0.95);
@@ -195,6 +195,302 @@ html, body {
   box-shadow: inset -1px -1px 0 #fff, inset 1px 1px 0 #808080;
 }
 
+/* ── Win95 Folder Window ── */
+.w95-window {
+  position: fixed;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 240px;
+  z-index: 1200;
+  background: #c0c0c0;
+  border: 2px solid #000;
+  box-shadow:
+    inset -1px -1px 0 #808080,
+    inset 1px 1px 0 #fff,
+    inset -2px -2px 0 #000,
+    inset 2px 2px 0 #dfdfdf,
+    2px 2px 0 rgba(0, 0, 0, 0.4);
+  font: 11px/1.3 "Tahoma", "MS Sans Serif", sans-serif;
+  color: #000;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.w95-titlebar {
+  display: flex;
+  align-items: center;
+  height: 18px;
+  padding: 1px 2px 1px 3px;
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  cursor: default;
+}
+.w95-titlebar-icon {
+  font-size: 12px;
+  margin-right: 3px;
+  line-height: 1;
+}
+.w95-titlebar-text {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.w95-titlebar-buttons {
+  display: flex;
+  gap: 2px;
+}
+.w95-titlebar-buttons button {
+  width: 16px;
+  height: 14px;
+  background: #c0c0c0;
+  border: 1px solid #000;
+  box-shadow: inset -1px -1px 0 #808080, inset 1px 1px 0 #fff;
+  font: 700 9px/1 "Tahoma", "MS Sans Serif", sans-serif;
+  color: #000;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.w95-titlebar-buttons button:active {
+  box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #fff;
+}
+.w95-menubar {
+  display: flex;
+  padding: 1px 0;
+  border-bottom: 1px solid #808080;
+  box-shadow: 0 1px 0 #fff;
+}
+.w95-menubar span {
+  padding: 1px 6px;
+  cursor: default;
+  font-size: 11px;
+}
+.w95-menubar span:hover {
+  background: #000080;
+  color: #fff;
+}
+.w95-menubar span u {
+  text-decoration: underline;
+}
+.w95-filelist {
+  background: #fff;
+  border: 1px solid #000;
+  box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #dfdfdf;
+  margin: 4px;
+  padding: 4px;
+  min-height: 100px;
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  scrollbar-width: thin;
+}
+.w95-filelist::-webkit-scrollbar { width: 16px; }
+.w95-filelist::-webkit-scrollbar-track {
+  background: #c0c0c0;
+  border-left: 1px solid #808080;
+}
+.w95-filelist::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border: 1px solid #000;
+  box-shadow: inset -1px -1px 0 #808080, inset 1px 1px 0 #fff;
+}
+.w95-filelist::-webkit-scrollbar-button { display: block; height: 16px; background: #c0c0c0; border: 1px solid #000; box-shadow: inset -1px -1px 0 #808080, inset 1px 1px 0 #fff; }
+.w95-file-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 2px;
+  cursor: default;
+  text-align: center;
+  border: 1px solid transparent;
+}
+.w95-file-item:hover {
+  background: rgba(0, 0, 128, 0.06);
+}
+.w95-file-item.selected {
+  background: #000080;
+  color: #fff;
+}
+.w95-file-item.selected .w95-file-name {
+  background: #000080;
+  color: #fff;
+}
+.w95-file-icon {
+  width: 32px;
+  height: 32px;
+  pointer-events: none;
+}
+.w95-file-icon svg {
+  width: 32px;
+  height: 32px;
+}
+.w95-file-name {
+  font-size: 10px;
+  margin-top: 2px;
+  max-width: 68px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 2px;
+}
+.w95-empty-msg {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 20px 8px;
+  color: #808080;
+  font-size: 10px;
+}
+.w95-statusbar {
+  display: flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 4px;
+  font-size: 10px;
+  color: #000;
+  box-shadow: inset -1px -1px 0 #fff, inset 1px 1px 0 #808080;
+  margin: 0 4px 4px;
+}
+.w95-tooltip {
+  position: fixed;
+  z-index: 9999;
+  background: #ffffe1;
+  border: 1px solid #000;
+  padding: 2px 5px;
+  font: 11px/1.4 "Tahoma", "MS Sans Serif", sans-serif;
+  color: #000;
+  white-space: pre;
+  pointer-events: none;
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.2);
+}
+.w95-filelist.drag-over {
+  background: #e8e8ff;
+  outline: 2px dashed #000080;
+  outline-offset: -3px;
+}
+.w95-window-body { /* collapsible wrapper */ }
+
+/* ── Win95 Dropdown Menu ── */
+.w95-dropdown {
+  position: fixed;
+  z-index: 9990;
+  background: #c0c0c0;
+  border: 2px solid #000;
+  box-shadow:
+    inset -1px -1px 0 #808080,
+    inset 1px 1px 0 #fff,
+    2px 2px 0 rgba(0, 0, 0, 0.35);
+  padding: 2px;
+  min-width: 140px;
+  font: 11px/1.3 "Tahoma", "MS Sans Serif", sans-serif;
+  color: #000;
+}
+.w95-dropdown-item {
+  padding: 3px 20px 3px 8px;
+  cursor: default;
+  white-space: nowrap;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.w95-dropdown-item:hover:not(.disabled) {
+  background: #000080;
+  color: #fff;
+}
+.w95-dd-shortcut {
+  color: #808080;
+  margin-left: auto;
+}
+.w95-dropdown-item:hover:not(.disabled) .w95-dd-shortcut {
+  color: #c0c0c0;
+}
+.w95-dropdown-item.disabled {
+  color: #808080;
+  text-shadow: 1px 1px 0 #fff;
+}
+.w95-dropdown-sep {
+  height: 1px;
+  margin: 3px 2px;
+  background: #808080;
+  box-shadow: 0 1px 0 #fff;
+}
+
+/* ── Win95 Resize Handle ── */
+.w95-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: se-resize;
+  /* Win95 grip pattern: diagonal dots */
+  background:
+    linear-gradient(135deg,
+      transparent 30%,
+      #fff 30%, #fff 35%,
+      transparent 35%, transparent 45%,
+      #fff 45%, #fff 50%,
+      transparent 50%, transparent 60%,
+      #fff 60%, #fff 65%,
+      transparent 65%, transparent 75%,
+      #fff 75%, #fff 80%,
+      transparent 80%),
+    linear-gradient(135deg,
+      transparent 32%,
+      #808080 32%, #808080 37%,
+      transparent 37%, transparent 47%,
+      #808080 47%, #808080 52%,
+      transparent 52%, transparent 62%,
+      #808080 62%, #808080 67%,
+      transparent 67%, transparent 77%,
+      #808080 77%, #808080 82%,
+      transparent 82%);
+  z-index: 2;
+}
+
+/* ── Win95 File List scrollbars (both axes) ── */
+.w95-filelist {
+  overflow: auto;
+}
+.w95-filelist::-webkit-scrollbar { width: 16px; height: 16px; }
+.w95-filelist::-webkit-scrollbar-corner { background: #c0c0c0; }
+
+/* ── MIDI Play/Stop button icons (Win95 media player) ── */
+.midi-btn-icon {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  vertical-align: middle;
+  margin-right: 2px;
+  position: relative;
+}
+.midi-btn-play {
+  /* right-pointing triangle */
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 9px;
+  border-color: transparent transparent transparent #000;
+}
+.midi-player-btn:disabled .midi-btn-play {
+  border-left-color: #808080;
+}
+.midi-btn-stop {
+  /* filled square */
+  width: 8px;
+  height: 8px;
+  background: #000;
+}
+.midi-player-btn:disabled .midi-btn-stop {
+  background: #808080;
+}
+
 /* Windows 95 inspired MIDI UI */
 .midi-float-panel {
   position: fixed;
@@ -203,7 +499,7 @@ html, body {
   z-index: 1100;
   width: 370px;
   max-width: 370px;
-  padding: 10px 11px;
+  padding: 12px 14px;
   background: #c0c0c0;
   border: 2px solid #000;
   box-shadow:
@@ -221,17 +517,17 @@ html, body {
   left: auto;
   transform: none;
   width: 370px;
-  height: 34px;
+  height: 30px;
   z-index: 1120;
-  padding: 1px;
-  background: linear-gradient(180deg, var(--ui-panel-top), var(--ui-panel-bottom));
-  border: 1px solid var(--ui-panel-line);
+  padding: 3px;
+  background: #c0c0c0;
+  border: 2px solid #000;
   box-shadow:
-    inset 1px 1px 0 rgba(255, 255, 255, 0.24),
-    inset -1px -1px 0 rgba(0, 0, 0, 0.44),
-    0 0 12px var(--ui-panel-glow);
-  -webkit-backdrop-filter: blur(2px) saturate(1.05);
-  backdrop-filter: blur(2px) saturate(1.05);
+    inset -1px -1px 0 #808080,
+    inset 1px 1px 0 #fff,
+    inset -2px -2px 0 #000,
+    inset 2px 2px 0 #dfdfdf,
+    0 4px 0 rgba(0, 0, 0, 0.35);
 }
 .midi-progress-wrap.midi-progress-float[data-playing="1"] {
   animation: midi-progress-breathe 2.6s ease-in-out infinite;
@@ -240,36 +536,14 @@ html, body {
   position: relative;
   width: 100%;
   height: 100%;
-  border: 1px solid rgba(132, 176, 210, 0.3);
-  background:
-    radial-gradient(130% 220% at 50% 100%, rgba(84, 136, 184, 0.18), rgba(6, 14, 24, 0) 52%),
-    linear-gradient(180deg, rgba(6, 14, 24, 0.84), rgba(8, 18, 30, 0.5));
+  border: none;
+  background: #000;
   box-shadow:
-    inset 1px 1px 0 rgba(200, 234, 255, 0.12),
-    inset -1px -1px 0 rgba(0, 0, 0, 0.62);
+    inset 1px 1px 0 #808080,
+    inset -1px -1px 0 #dfdfdf;
 }
 .midi-progress-wrap.midi-progress-float .midi-progress-bar::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    repeating-linear-gradient(
-      180deg,
-      rgba(130, 202, 255, 0.08) 0px,
-      rgba(130, 202, 255, 0.08) 1px,
-      transparent 1px,
-      transparent 3px
-    ),
-    repeating-linear-gradient(
-      90deg,
-      rgba(120, 180, 236, 0.03) 0px,
-      rgba(120, 180, 236, 0.03) 1px,
-      transparent 1px,
-      transparent 6px
-    );
-  opacity: 0.48;
-  mix-blend-mode: screen;
-  pointer-events: none;
+  display: none;
 }
 .midi-progress-wrap.midi-progress-float .midi-progress-fill {
   left: 0;
@@ -278,10 +552,8 @@ html, body {
   bottom: auto;
   width: 0%;
   height: 100%;
-  background: linear-gradient(90deg, rgba(156, 214, 255, 0.42), rgba(244, 251, 255, 0.94));
-  box-shadow:
-    0 0 5px rgba(176, 224, 255, 0.42),
-    inset 0 0 6px rgba(255, 255, 255, 0.42);
+  background: linear-gradient(90deg, rgba(0, 0, 128, 0.7), rgba(80, 128, 255, 0.9));
+  box-shadow: 0 0 6px rgba(80, 128, 255, 0.4);
 }
 .midi-progress-wrap.midi-progress-float .midi-progress-wave {
   opacity: 0.8;
@@ -294,17 +566,22 @@ html, body {
 @keyframes midi-progress-breathe {
   0%, 100% {
     box-shadow:
-      inset 1px 1px 0 rgba(255, 255, 255, 0.24),
-      inset -1px -1px 0 rgba(0, 0, 0, 0.44),
-      0 0 12px var(--ui-panel-glow);
-    filter: saturate(1) brightness(1);
+      inset -1px -1px 0 #808080,
+      inset 1px 1px 0 #fff,
+      inset -2px -2px 0 #000,
+      inset 2px 2px 0 #dfdfdf,
+      0 4px 0 rgba(0, 0, 0, 0.35);
+    filter: brightness(1);
   }
   50% {
     box-shadow:
-      inset 1px 1px 0 rgba(255, 255, 255, 0.28),
-      inset -1px -1px 0 rgba(0, 0, 0, 0.48),
-      0 0 18px rgba(132, 200, 255, 0.32);
-    filter: saturate(1.08) brightness(1.05);
+      inset -1px -1px 0 #808080,
+      inset 1px 1px 0 #fff,
+      inset -2px -2px 0 #000,
+      inset 2px 2px 0 #dfdfdf,
+      0 4px 0 rgba(0, 0, 0, 0.35),
+      0 0 10px rgba(80, 128, 255, 0.2);
+    filter: brightness(1.04);
   }
 }
 
@@ -417,10 +694,10 @@ html, body {
   margin: 6px 0 4px;
   max-height: 120px;
   overflow-y: auto;
+  padding: 4px 5px;
   scrollbar-width: thin; /* Firefox 64+, Chrome 121+ */
   border: 1px solid #000;
   background: #fff;
-  padding: 3px 4px;
 }
 .midi-player-tracks::-webkit-scrollbar {
   width: 8px;
@@ -463,11 +740,11 @@ html, body {
 .midi-player-metrics {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 1px 9px;
+  gap: 2px 10px;
   font-size: 10px;
   color: #242424;
   margin-bottom: 4px;
-  padding: 4px;
+  padding: 5px 6px;
   border: 1px solid #000;
   background: #e6e6e6;
 }
@@ -482,7 +759,7 @@ html, body {
 .midi-player-buttons {
   display: flex;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .midi-player-btn {
   padding: 4px 10px;
@@ -650,8 +927,8 @@ html, body {
     right: 8px;
     bottom: 8px;
     width: 284px;
-    height: 28px;
-    padding: 1px;
+    height: 26px;
+    padding: 3px;
   }
   .midi-roll-overlay {
     left: 2.4%;
@@ -669,6 +946,12 @@ html, body {
     max-width: 48%;
     font-size: 9px;
     padding: 1px 4px;
+  }
+  #beat-step-viz {
+    left: 8px;
+    bottom: 8px;
+    height: 18px;
+    width: 80px;
   }
 }
 
@@ -724,10 +1007,6 @@ html, body {
   0%, 100% { opacity: 0.15; }
   50% { opacity: 0.4; }
 }
-@keyframes y2k-orbit-spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
 @keyframes y2k-waveform-drift {
   0%, 100% { opacity: 0.35; }
   50% { opacity: 0.55; }
@@ -778,7 +1057,7 @@ html, body {
 .y2k-cross {
   position: absolute;
   transform: translate(-50%, -50%);
-  font: 300 22px/1 "Lucida Console", "Courier New", monospace;
+  font: 300 22px/1 var(--ui-code-font);
   color: rgba(200, 235, 255, 0.4);
   text-shadow: 2px 0 0 rgba(255, 50, 80, 0.18), -2px 0 0 rgba(50, 200, 255, 0.18), 0 0 12px rgba(120, 190, 255, 0.25);
   pointer-events: none;
@@ -790,7 +1069,7 @@ html, body {
   position: absolute;
   left: 16px;
   top: -3px;
-  font: 400 7px/1 "Lucida Console", monospace;
+  font: 400 7px/1 var(--ui-code-font);
   letter-spacing: 0.14em;
   color: rgba(160, 210, 255, 0.22);
   white-space: nowrap;
@@ -857,8 +1136,8 @@ html, body {
 }
 .y2k-datastream-inner {
   white-space: nowrap;
-  font: 400 9px/16px "Lucida Console", "Courier New", monospace;
-  letter-spacing: 0.2em;
+  font: 400 10px/16px var(--ui-code-font);
+  letter-spacing: 0.16em;
   color: rgba(200, 230, 255, 0.5);
   text-shadow: 1px 0 0 rgba(255, 60, 80, 0.2), -1px 0 0 rgba(50, 210, 255, 0.2), 0 0 8px rgba(120, 190, 255, 0.25);
   animation: y2k-stream-scroll 20s linear infinite;
@@ -900,16 +1179,16 @@ html, body {
   pointer-events: none;
   display: flex;
   align-items: flex-end;
-  gap: 2px;
-  height: 48px;
+  gap: 3px;
+  height: 56px;
   opacity: 0.5;
   mix-blend-mode: screen;
 }
 .y2k-spec-bar {
-  width: 4px;
-  min-height: 2px;
+  width: 5px;
+  min-height: 3px;
   border-radius: 1px 1px 0 0;
-  transition: height 50ms ease-out;
+  transition: height 60ms ease-out;
   will-change: height;
 }
 
@@ -920,7 +1199,7 @@ html, body {
   left: 2.5%;
   z-index: 1378;
   pointer-events: none;
-  font: 100 42px/1 "Lucida Console", "Courier New", monospace;
+  font: 100 42px/1 var(--ui-code-font);
   letter-spacing: 0.12em;
   color: rgba(220, 240, 255, 0.75);
   text-shadow: 3px 0 0 rgba(255, 40, 80, 0.3), -3px 0 0 rgba(40, 200, 255, 0.3), 0 0 32px rgba(120, 190, 255, 0.4);
@@ -931,7 +1210,7 @@ html, body {
 }
 .y2k-chord-name { display: block; }
 #y2k-chord-sub {
-  font: 400 9px/1.4 "Lucida Console", monospace;
+  font: 400 9px/1.4 var(--ui-code-font);
   letter-spacing: 0.3em;
   color: rgba(180, 220, 255, 0.35);
   margin-top: 6px;
@@ -961,7 +1240,7 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font: 600 8px/1 "Lucida Console", monospace;
+  font: 600 8px/1 var(--ui-code-font);
   letter-spacing: 0.1em;
   color: rgba(200, 235, 255, 0.55);
   text-shadow: 0 0 8px rgba(120, 200, 255, 0.35);
@@ -984,6 +1263,16 @@ html, body {
   0%, 100% { opacity: 0.1; transform: scale(0.5); }
   50% { opacity: 0.8; transform: scale(1.5); }
 }
+@keyframes y2k-dot-breathe-sm {
+  0%, 100% { opacity: 0.08; transform: scale(0.6); }
+  50% { opacity: 0.6; transform: scale(1.2); }
+}
+@keyframes y2k-dot-breathe-lg {
+  0%, 100% { opacity: 0.12; transform: scale(0.4); }
+  50% { opacity: 0.85; transform: scale(1.8); }
+}
+.y2k-dot:nth-child(2n) { animation-name: y2k-dot-breathe-sm; animation-duration: 3.4s; }
+.y2k-dot:nth-child(3n) { animation-name: y2k-dot-breathe-lg; animation-duration: 2.6s; }
 
 /* ── System ID ── TOP-LEFT under bracket */
 #y2k-sysid {
@@ -992,7 +1281,7 @@ html, body {
   left: 6%;
   z-index: 1365;
   pointer-events: none;
-  font: 400 9px/1.6 "Lucida Console", "Courier New", monospace;
+  font: 400 9px/1.6 var(--ui-code-font);
   letter-spacing: 0.2em;
   color: rgba(180, 220, 255, 0.35);
   text-shadow: 1px 0 0 rgba(255, 50, 80, 0.15), -1px 0 0 rgba(50, 200, 255, 0.15), 0 0 6px rgba(120, 180, 255, 0.12);
@@ -1058,7 +1347,7 @@ html, body {
   position: fixed;
   right: 2%;
   top: 50%;
-  transform: translateY(-50%);
+  transform: translateY(-50%) translateZ(0);
   width: 6px;
   height: 120px;
   z-index: 1378;
@@ -1067,7 +1356,6 @@ html, body {
   border-radius: 3px;
   overflow: hidden;
   background: rgba(80, 140, 200, 0.06);
-  transform: translateZ(0);
 }
 #y2k-velocity-fill {
   position: absolute;
@@ -1084,7 +1372,7 @@ html, body {
   right: 12px;
   top: 50%;
   transform: translateY(-50%);
-  font: 400 7px/1 "Lucida Console", monospace;
+  font: 400 7px/1 var(--ui-code-font);
   letter-spacing: 0.15em;
   color: rgba(180, 220, 255, 0.3);
   white-space: nowrap;
@@ -1100,7 +1388,7 @@ html, body {
   z-index: 1378;
   pointer-events: none;
   text-align: right;
-  font: 200 28px/1 "Lucida Console", monospace;
+  font: 200 28px/1 var(--ui-code-font);
   letter-spacing: 0.08em;
   color: rgba(200, 230, 255, 0.45);
   text-shadow: 2px 0 0 rgba(255, 40, 80, 0.2), -2px 0 0 rgba(40, 200, 255, 0.2), 0 0 20px rgba(120, 190, 255, 0.3);
@@ -1109,7 +1397,7 @@ html, body {
   transition: opacity 0.2s;
 }
 #y2k-keysig-sub {
-  font: 400 8px/1.4 "Lucida Console", monospace;
+  font: 400 8px/1.4 var(--ui-code-font);
   letter-spacing: 0.25em;
   color: rgba(170, 210, 255, 0.3);
   margin-top: 4px;
@@ -1173,42 +1461,66 @@ html, body {
   background: linear-gradient(90deg, transparent 0%, rgba(160, 220, 255, 0.15) 20%, rgba(160, 220, 255, 0.15) 80%, transparent 100%);
 }
 
-/* ── Orbit Ring ── rotating ring with dots, BOTTOM-LEFT */
-#y2k-orbit {
+/* ── Beat Step Visualizer ── tiny Win95 bar, bottom-left beside progress */
+#beat-step-viz {
   position: fixed;
-  bottom: 3%;
-  left: 7%;
-  width: 64px;
-  height: 64px;
-  z-index: 1374;
+  bottom: 12px;
+  left: 12px;
+  z-index: 1120;
+  height: 20px;
+  width: 100px;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  background: #c0c0c0;
+  border: 2px solid #000;
+  box-shadow:
+    inset -1px -1px 0 #808080,
+    inset 1px 1px 0 #fff,
+    inset -2px -2px 0 #000,
+    inset 2px 2px 0 #dfdfdf,
+    0 4px 0 rgba(0, 0, 0, 0.35);
   pointer-events: none;
-  mix-blend-mode: screen;
-  opacity: 0.3;
+  opacity: 0;
+  transition: opacity 0.3s ease-out;
 }
-#y2k-orbit svg { width: 100%; height: 100%; overflow: visible; }
-#y2k-orbit-ring {
-  fill: none;
-  stroke: rgba(160, 210, 255, 0.12);
-  stroke-width: 0.8;
-  stroke-dasharray: 3 6;
+#beat-step-viz.active { opacity: 1; }
+.beat-step-well {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0;
+  margin: 3px;
+  height: calc(100% - 6px);
+  background: #000;
+  box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #dfdfdf;
+  overflow: hidden;
 }
-.y2k-orbit-dot {
-  fill: rgba(200, 235, 255, 0.6);
-  filter: drop-shadow(0 0 3px rgba(140, 210, 255, 0.4));
+.beat-bar {
+  flex: 1;
+  background: #1a1a2e;
+  transition: background 60ms ease-out, box-shadow 60ms ease-out;
 }
-#y2k-orbit-group {
-  transform-origin: 32px 32px;
-  animation: y2k-orbit-spin 12s linear infinite;
+.beat-bar.hit {
+  background: #5080ff;
+  box-shadow: 0 0 8px rgba(80, 128, 255, 0.6) inset;
 }
-
-/* ── Frequency Label ── BOTTOM-LEFT, between spectrum and orbit */
+.beat-bar.hit.downbeat {
+  background: #70a0ff;
+  box-shadow: 0 0 10px rgba(100, 160, 255, 0.7) inset;
+}
+.beat-bar.trail {
+  background: #0e1a38;
+}
+/* ── Frequency Label ── BOTTOM-LEFT */
 #y2k-freq-label {
   position: fixed;
   bottom: 10%;
   left: 2.5%;
   z-index: 1376;
   pointer-events: none;
-  font: 200 11px/1.4 "Lucida Console", monospace;
+  font: 200 11px/1.4 var(--ui-code-font);
   letter-spacing: 0.15em;
   color: rgba(180, 220, 255, 0.3);
   text-shadow: 0 0 8px rgba(120, 190, 255, 0.15);
@@ -1233,7 +1545,7 @@ html, body {
   z-index: 1376;
   pointer-events: none;
   text-align: right;
-  font: 200 32px/1 "Lucida Console", monospace;
+  font: 200 32px/1 var(--ui-code-font);
   color: rgba(200, 230, 255, 0.25);
   text-shadow: 0 0 16px rgba(120, 190, 255, 0.15);
   mix-blend-mode: screen;
@@ -1241,7 +1553,7 @@ html, body {
   transition: opacity 0.15s;
 }
 #y2k-polycount-label {
-  font: 400 7px/1.4 "Lucida Console", monospace;
+  font: 400 7px/1.4 var(--ui-code-font);
   letter-spacing: 0.3em;
   color: rgba(170, 210, 255, 0.25);
   display: block;
@@ -1280,3 +1592,22 @@ html, body {
   height: 100%;
   image-rendering: auto;
 }
+
+/* ── Smooth opacity transitions for JS-driven HUD elements ── */
+#y2k-scanline { transition: opacity 60ms ease-out; }
+#y2k-spectrum { transition: opacity 80ms ease-out; }
+#y2k-arc { transition: opacity 80ms ease-out; }
+#y2k-sysid { transition: opacity 100ms ease-out; }
+#y2k-noise { transition: opacity 80ms ease-out; }
+#y2k-velocity { transition: opacity 100ms ease-out; }
+#y2k-waveform { transition: opacity 100ms ease-out; }
+#y2k-polycount { transition: opacity 100ms ease-out; }
+#y2k-constellation { transition: opacity 120ms ease-out; }
+.y2k-ticker-bar { transition: width 80ms ease-out, opacity 100ms ease-out; }
+
+/* Wrapper divs for JS-created containers */
+.y2k-bracket-frame { transition: transform 120ms ease-out, opacity 80ms ease-out; will-change: transform, opacity; }
+.y2k-crosshairs-wrap { transition: opacity 100ms ease-out; }
+.y2k-gradient-wrap { transition: opacity 120ms ease-out; }
+.y2k-dots-wrap { transition: opacity 100ms ease-out; }
+.y2k-edge-wrap { transition: opacity 120ms ease-out; }

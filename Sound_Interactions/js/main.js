@@ -1349,11 +1349,13 @@ import { initMidiPlayer } from './midi-player.js';
   let displayedMidiNotes = []; // current MIDI chord for text display (every note)
   let midiRollPreview = [];
   let midiPlaybackActive = false;
+  let externalLoadMidi = null;
   let midiPlaybackSpeed = 1;
   let midiPlaybackPosition = 0;
   let midiPlaybackDuration = 0;
   let midiPlaybackPolyphony = 0;
   let midiSourceBpm = 120;
+  let midiBeatsPerBar = 4;
   let composer, postScene, postCamera, postQuad, rtScene;
   const particleMatOpts = { transparent: true, sizeAttenuation: true, vertexColors: false, blending: THREE.AdditiveBlending, depthWrite: false };
   let noteRepeatOverlayEl = null;
@@ -1393,7 +1395,9 @@ import { initMidiPlayer } from './midi-player.js';
   let waveformCanvas = null;
   let waveformCtx = null;
   let edgeLinesEl = null;
-  let orbitEl = null;
+  let beatStepEl = null;
+  let beatStepDots = [];
+  let lastBeatIndex = -1;
   let freqLabelEl = null;
   let freqHzEl = null;
   let polycountEl = null;
@@ -1408,8 +1412,6 @@ import { initMidiPlayer } from './midi-player.js';
   let constellationShockwave = 0;
   let constellationFade = new Float32Array(12);
   let constellationParticles = null;   // lazy-init array of {x,y,vx,vy}
-  let orbitRingRef = null;
-  let orbitDotRefs = null;
   let frameBudgetOver = 0;             // counts consecutive slow frames
   let beatFlashEl = null;              // full-screen beat flash overlay
   let beatFlashLevel = 0;             // smoothed flash opacity (lerp target)
@@ -3905,7 +3907,7 @@ import { initMidiPlayer } from './midi-player.js';
       'right:2.5%',
       'z-index:1350',
       'pointer-events:none',
-      'font:700 11px/1.2 "Lucida Console","Courier New",monospace',
+      'font:700 11px/1.2 "Lucida Console","Cascadia Mono","Consolas","Courier New",monospace',
       'letter-spacing:0.12em',
       'color:rgba(255,255,255,0.55)',
       'text-shadow:1px 0 rgba(255,50,50,0.4),-1px 0 rgba(50,220,255,0.35)',
@@ -3920,6 +3922,7 @@ import { initMidiPlayer } from './midi-player.js';
 
   function createBracketFrame() {
     bracketFrameEl = document.createElement('div');
+    bracketFrameEl.className = 'y2k-bracket-frame';
     bracketFrameEl.style.cssText = 'position:fixed;inset:0;z-index:1380;pointer-events:none;opacity:0.25';
     const corners = ['tl', 'tr', 'bl', 'br'];
     corners.forEach(c => {
@@ -3932,6 +3935,7 @@ import { initMidiPlayer } from './midi-player.js';
 
   function createCrosshairs() {
     crosshairEl = document.createElement('div');
+    crosshairEl.className = 'y2k-crosshairs-wrap';
     crosshairEl.style.cssText = 'position:fixed;inset:0;z-index:1370;pointer-events:none;opacity:0.08';
     const positions = [
       { top: '33.3%', left: '33.3%', coord: '0.33 0.33' },
@@ -3969,6 +3973,7 @@ import { initMidiPlayer } from './midi-player.js';
 
   function createGradientCorners() {
     gradientCornersEl = document.createElement('div');
+    gradientCornersEl.className = 'y2k-gradient-wrap';
     gradientCornersEl.style.cssText = 'position:fixed;inset:0;z-index:1355;pointer-events:none;opacity:0.04';
     const tl = document.createElement('div');
     tl.className = 'y2k-gradient-corner y2k-gc-tl';
@@ -4042,6 +4047,7 @@ import { initMidiPlayer } from './midi-player.js';
 
   function createBreathingDots() {
     dotsEl = document.createElement('div');
+    dotsEl.className = 'y2k-dots-wrap';
     dotsEl.style.cssText = 'position:fixed;inset:0;z-index:1358;pointer-events:none';
     const positions = [
       { top: '18%', left: '8%' }, { top: '24%', right: '14%' },
@@ -4116,6 +4122,7 @@ import { initMidiPlayer } from './midi-player.js';
 
   function createEdgeLines() {
     edgeLinesEl = document.createElement('div');
+    edgeLinesEl.className = 'y2k-edge-wrap';
     edgeLinesEl.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:1356';
     var sides = ['left', 'right', 'top', 'bottom'];
     sides.forEach(function(s) {
@@ -4126,13 +4133,26 @@ import { initMidiPlayer } from './midi-player.js';
     document.body.appendChild(edgeLinesEl);
   }
 
-  function createOrbitRing() {
-    orbitEl = document.createElement('div');
-    orbitEl.id = 'y2k-orbit';
-    orbitEl.innerHTML = '<svg viewBox="0 0 64 64"><g id="y2k-orbit-group"><circle id="y2k-orbit-ring" cx="32" cy="32" r="28"/><circle class="y2k-orbit-dot" cx="32" cy="4" r="2"/><circle class="y2k-orbit-dot" cx="60" cy="32" r="1.5"/><circle class="y2k-orbit-dot" cx="32" cy="60" r="1.2"/></g></svg>';
-    document.body.appendChild(orbitEl);
-    orbitRingRef = orbitEl.querySelector('#y2k-orbit-ring');
-    orbitDotRefs = orbitEl.querySelectorAll('.y2k-orbit-dot');
+  function createBeatStepViz() {
+    beatStepEl = document.createElement('div');
+    beatStepEl.id = 'beat-step-viz';
+    var well = document.createElement('div');
+    well.className = 'beat-step-well';
+    beatStepEl.appendChild(well);
+    document.body.appendChild(beatStepEl);
+    rebuildBeatDots(midiBeatsPerBar);
+  }
+  function rebuildBeatDots(count) {
+    var well = beatStepEl.querySelector('.beat-step-well');
+    well.innerHTML = '';
+    beatStepDots = [];
+    for (var i = 0; i < count; i++) {
+      var bar = document.createElement('div');
+      bar.className = 'beat-bar';
+      if (i === 0) bar.classList.add('downbeat');
+      well.appendChild(bar);
+      beatStepDots.push(bar);
+    }
   }
 
   function createFreqLabel() {
@@ -6111,6 +6131,7 @@ import { initMidiPlayer } from './midi-player.js';
         updateEffectParams(effectName, chain[effectName].nodes, chain[effectName].params);
       }
     },
+    registerMidiLoader: (fn) => { externalLoadMidi = fn; },
     updateKeyDisplayFromMidi: (notes) => { displayedMidiNotes = notes && notes.length ? notes.slice() : []; },
     setMidiPlaybackState: (active) => {
       midiPlaybackActive = !!active;
@@ -6123,6 +6144,7 @@ import { initMidiPlayer } from './midi-player.js';
       if (typeof state.duration === 'number') midiPlaybackDuration = Math.max(0, state.duration);
       if (typeof state.polyphony === 'number') midiPlaybackPolyphony = Math.max(0, state.polyphony);
       if (typeof state.bpm === 'number') midiSourceBpm = Math.max(30, Math.min(260, state.bpm));
+      if (typeof state.beatsPerBar === 'number') midiBeatsPerBar = Math.max(2, Math.min(12, state.beatsPerBar));
       if (Array.isArray(state.preview)) {
         midiRollPreview = state.preview.slice(0, ROLL3D_PREVIEW_CAP).map((n) => ({
           midi: Math.max(0, Math.min(127, Math.round(n.midi || 0))),
@@ -6140,12 +6162,570 @@ import { initMidiPlayer } from './midi-player.js';
     }
   });
 
+  // ═══ Win95 MIDI Folder Window ═══
+  const MIDI_DB = 'sonic-midi-library';
+  const MIDI_STORE = 'files';
+  let midiFolderEl = null;
+  let midiFolderList = null;
+  let midiFolderStatus = null;
+  let midiFolderTooltip = null;
+  let midiFolderDragX = 0, midiFolderDragY = 0, midiFolderDragging = false;
+  let midiFolderSelected = null;
+  let midiFolderMinimized = false;
+
+  function openMidiDB() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(MIDI_DB, 1);
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains(MIDI_STORE)) {
+          db.createObjectStore(MIDI_STORE, { keyPath: 'id', autoIncrement: true });
+        }
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+  function saveMidiFile(name, arrayBuffer) {
+    return openMidiDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(MIDI_STORE, 'readwrite');
+        tx.objectStore(MIDI_STORE).put({ name: name, data: arrayBuffer, size: arrayBuffer.byteLength, addedAt: Date.now() });
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+  function deleteMidiFile(id) {
+    return openMidiDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(MIDI_STORE, 'readwrite');
+        tx.objectStore(MIDI_STORE).delete(id);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+  function getAllMidiFiles() {
+    return openMidiDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(MIDI_STORE, 'readonly');
+        var req = tx.objectStore(MIDI_STORE).getAll();
+        req.onsuccess = function () { resolve(req.result || []); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+  function getMidiFile(id) {
+    return openMidiDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(MIDI_STORE, 'readonly');
+        var req = tx.objectStore(MIDI_STORE).get(id);
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    return (bytes / 1024).toFixed(1) + ' KB';
+  }
+  function formatDuration(sec) {
+    var m = Math.floor(sec / 60);
+    var s = Math.round(sec % 60);
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  // Hidden file input for importing MIDI via File menu
+  var folderFileInput = document.createElement('input');
+  folderFileInput.type = 'file';
+  folderFileInput.accept = '.mid,.midi';
+  folderFileInput.multiple = true;
+  folderFileInput.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none';
+  document.body.appendChild(folderFileInput);
+  folderFileInput.addEventListener('change', function () {
+    for (var i = 0; i < folderFileInput.files.length; i++) {
+      (function (f) {
+        if (!f.name.match(/\.midi?$/i)) return;
+        f.arrayBuffer().then(function (buf) {
+          saveMidiFile(f.name, buf).then(function () { refreshMidiFolder(); });
+        });
+      })(folderFileInput.files[i]);
+    }
+    folderFileInput.value = '';
+  });
+
+  var activeDropdown = null;
+  function closeDropdown() {
+    if (activeDropdown) { activeDropdown.remove(); activeDropdown = null; }
+  }
+  document.addEventListener('mousedown', function (e) {
+    if (activeDropdown && !activeDropdown.contains(e.target)) closeDropdown();
+  });
+
+  function showDropdown(anchor, items) {
+    closeDropdown();
+    var dd = document.createElement('div');
+    dd.className = 'w95-dropdown';
+    var rect = anchor.getBoundingClientRect();
+    dd.style.left = rect.left + 'px';
+    dd.style.top = rect.bottom + 'px';
+    items.forEach(function (it) {
+      if (it === '---') {
+        var hr = document.createElement('div');
+        hr.className = 'w95-dropdown-sep';
+        dd.appendChild(hr);
+        return;
+      }
+      var row = document.createElement('div');
+      row.className = 'w95-dropdown-item';
+      if (it.disabled) row.classList.add('disabled');
+      var lbl = it.checked ? '\u2713  ' + it.label : it.label;
+      if (it.shortcut) {
+        var lblSpan = document.createElement('span');
+        lblSpan.textContent = lbl;
+        var scSpan = document.createElement('span');
+        scSpan.className = 'w95-dd-shortcut';
+        scSpan.textContent = it.shortcut;
+        row.appendChild(lblSpan);
+        row.appendChild(scSpan);
+      } else {
+        row.textContent = lbl;
+      }
+      if (!it.disabled) {
+        row.addEventListener('click', function () { closeDropdown(); it.action(); });
+      }
+      dd.appendChild(row);
+    });
+    document.body.appendChild(dd);
+    activeDropdown = dd;
+  }
+
+  function createMidiFolder() {
+    midiFolderEl = document.createElement('div');
+    midiFolderEl.id = 'midi-folder-window';
+    midiFolderEl.className = 'w95-window';
+
+    // Title bar
+    var titlebar = document.createElement('div');
+    titlebar.className = 'w95-titlebar';
+    var icon = document.createElement('span');
+    icon.className = 'w95-titlebar-icon';
+    icon.textContent = '\uD83D\uDCC1';
+    var title = document.createElement('span');
+    title.className = 'w95-titlebar-text';
+    title.textContent = ' MIDI Library';
+    var btns = document.createElement('div');
+    btns.className = 'w95-titlebar-buttons';
+    var btnMin = document.createElement('button');
+    btnMin.textContent = '_';
+    btnMin.title = 'Minimize';
+    btnMin.addEventListener('click', function (e) { e.stopPropagation(); toggleMidiFolder(); });
+    var btnClose = document.createElement('button');
+    btnClose.textContent = '\u00D7';
+    btnClose.title = 'Close';
+    btnClose.addEventListener('click', function (e) { e.stopPropagation(); midiFolderEl.style.display = 'none'; });
+    btns.appendChild(btnMin);
+    btns.appendChild(btnClose);
+    titlebar.appendChild(icon);
+    titlebar.appendChild(title);
+    titlebar.appendChild(btns);
+
+    // Double-click titlebar toggles
+    titlebar.addEventListener('dblclick', function (e) {
+      if (e.target.tagName === 'BUTTON') return;
+      toggleMidiFolder();
+    });
+
+    // Titlebar drag
+    titlebar.addEventListener('mousedown', function (e) {
+      if (e.target.tagName === 'BUTTON') return;
+      midiFolderDragging = true;
+      var rect = midiFolderEl.getBoundingClientRect();
+      midiFolderDragX = e.clientX - rect.left;
+      midiFolderDragY = e.clientY - rect.top;
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!midiFolderDragging) return;
+      midiFolderEl.style.left = (e.clientX - midiFolderDragX) + 'px';
+      midiFolderEl.style.top = (e.clientY - midiFolderDragY) + 'px';
+      midiFolderEl.style.transform = 'none';
+    });
+    document.addEventListener('mouseup', function () { midiFolderDragging = false; });
+
+    // Menu bar with functional dropdowns
+    var menubar = document.createElement('div');
+    menubar.className = 'w95-menubar';
+    var menuFile = document.createElement('span');
+    menuFile.innerHTML = '<u>F</u>ile';
+    menuFile.addEventListener('click', function (e) {
+      e.stopPropagation();
+      showDropdown(menuFile, [
+        { label: 'Open...', action: function () { folderFileInput.click(); } },
+        '---',
+        { label: 'Delete', action: function () {
+          if (midiFolderSelected != null) {
+            deleteMidiFile(midiFolderSelected).then(function () { midiFolderSelected = null; refreshMidiFolder(); });
+          }
+        }, disabled: midiFolderSelected == null },
+        '---',
+        { label: 'Close', action: function () { midiFolderEl.style.display = 'none'; } }
+      ]);
+    });
+    var menuEdit = document.createElement('span');
+    menuEdit.innerHTML = '<u>E</u>dit';
+    menuEdit.addEventListener('click', function (e) {
+      e.stopPropagation();
+      showDropdown(menuEdit, [
+        { label: 'Select All', action: function () {
+          var items = midiFolderList.querySelectorAll('.w95-file-item');
+          items.forEach(function (it) { it.classList.add('selected'); });
+        } },
+        { label: 'Delete Selected', action: function () {
+          if (midiFolderSelected != null) {
+            deleteMidiFile(midiFolderSelected).then(function () { midiFolderSelected = null; refreshMidiFolder(); });
+          }
+        }, disabled: midiFolderSelected == null }
+      ]);
+    });
+    var menuView = document.createElement('span');
+    menuView.innerHTML = '<u>V</u>iew';
+    menuView.addEventListener('click', function (e) {
+      e.stopPropagation();
+      showDropdown(menuView, [
+        { label: 'Refresh', action: function () { refreshMidiFolder(); } }
+      ]);
+    });
+    menubar.appendChild(menuFile);
+    menubar.appendChild(menuEdit);
+    menubar.appendChild(menuView);
+
+    // File list
+    midiFolderList = document.createElement('div');
+    midiFolderList.className = 'w95-filelist';
+
+    // Drag-drop on file list
+    midiFolderList.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      midiFolderList.classList.add('drag-over');
+    });
+    midiFolderList.addEventListener('dragleave', function () {
+      midiFolderList.classList.remove('drag-over');
+    });
+    midiFolderList.addEventListener('drop', function (e) {
+      e.preventDefault();
+      midiFolderList.classList.remove('drag-over');
+      var files = e.dataTransfer.files;
+      for (var i = 0; i < files.length; i++) {
+        (function (f) {
+          if (!f.name.match(/\.midi?$/i)) return;
+          f.arrayBuffer().then(function (buf) {
+            saveMidiFile(f.name, buf).then(function () { refreshMidiFolder(); });
+          });
+        })(files[i]);
+      }
+    });
+
+    // Click on empty area deselects
+    midiFolderList.addEventListener('click', function (e) {
+      if (e.target === midiFolderList) {
+        if (midiFolderSelected) {
+          var prev = midiFolderList.querySelector('.w95-file-item.selected');
+          if (prev) prev.classList.remove('selected');
+          midiFolderSelected = null;
+        }
+      }
+    });
+
+    // Status bar
+    var statusbar = document.createElement('div');
+    statusbar.className = 'w95-statusbar';
+    midiFolderStatus = document.createElement('span');
+    midiFolderStatus.textContent = 'Drag .mid files here';
+    statusbar.appendChild(midiFolderStatus);
+
+    // Body wrapper (collapsible)
+    var body = document.createElement('div');
+    body.className = 'w95-window-body';
+    body.appendChild(menubar);
+    body.appendChild(midiFolderList);
+    body.appendChild(statusbar);
+
+    // Resize handle
+    var resizeHandle = document.createElement('div');
+    resizeHandle.className = 'w95-resize-handle';
+    body.appendChild(resizeHandle);
+    var resizing = false, resizeStartX = 0, resizeStartY = 0, resizeStartW = 0, resizeStartH = 0;
+    resizeHandle.addEventListener('mousedown', function (e) {
+      resizing = true;
+      resizeStartX = e.clientX;
+      resizeStartY = e.clientY;
+      resizeStartW = midiFolderEl.offsetWidth;
+      resizeStartH = midiFolderEl.offsetHeight;
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!resizing) return;
+      var w = Math.max(180, resizeStartW + e.clientX - resizeStartX);
+      var h = Math.max(100, resizeStartH + e.clientY - resizeStartY);
+      midiFolderEl.style.width = w + 'px';
+      midiFolderEl.style.height = h + 'px';
+    });
+    document.addEventListener('mouseup', function () { resizing = false; });
+
+    midiFolderEl.appendChild(titlebar);
+    midiFolderEl.appendChild(body);
+    document.body.appendChild(midiFolderEl);
+
+    // Tooltip
+    midiFolderTooltip = document.createElement('div');
+    midiFolderTooltip.className = 'w95-tooltip';
+    midiFolderTooltip.style.display = 'none';
+    document.body.appendChild(midiFolderTooltip);
+
+    // Default: collapsed
+    midiFolderMinimized = true;
+    body.style.display = 'none';
+
+    refreshMidiFolder();
+  }
+
+  function toggleMidiFolder() {
+    midiFolderMinimized = !midiFolderMinimized;
+    var body = midiFolderEl.querySelector('.w95-window-body');
+    if (body) body.style.display = midiFolderMinimized ? 'none' : '';
+  }
+
+  function refreshMidiFolder() {
+    getAllMidiFiles().then(function (files) {
+      midiFolderList.innerHTML = '';
+      if (files.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'w95-empty-msg';
+        empty.textContent = 'Empty — drag .mid files here';
+        midiFolderList.appendChild(empty);
+      }
+      files.forEach(function (f) {
+        var item = document.createElement('div');
+        item.className = 'w95-file-item';
+        item.dataset.id = f.id;
+
+        var iconEl = document.createElement('div');
+        iconEl.className = 'w95-file-icon';
+        iconEl.innerHTML = '<svg viewBox="0 0 32 32" width="32" height="32">' +
+          '<path d="M6 2h14l6 6v20H6z" fill="#fff" stroke="#000" stroke-width="1"/>' +
+          '<path d="M20 2v6h6" fill="#c0c0c0" stroke="#000" stroke-width="1"/>' +
+          '<text x="16" y="23" text-anchor="middle" font-size="14" font-family="serif" fill="#000080">\u266A</text>' +
+          '</svg>';
+
+        var nameEl = document.createElement('div');
+        nameEl.className = 'w95-file-name';
+        nameEl.textContent = f.name;
+        nameEl.title = f.name;
+
+        item.appendChild(iconEl);
+        item.appendChild(nameEl);
+
+        // Single click — select
+        item.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var prev = midiFolderList.querySelector('.w95-file-item.selected');
+          if (prev) prev.classList.remove('selected');
+          item.classList.add('selected');
+          midiFolderSelected = f.id;
+        });
+
+        // Double click — load & play
+        item.addEventListener('dblclick', function () {
+          getMidiFile(f.id).then(function (record) {
+            if (record && record.data && externalLoadMidi) {
+              externalLoadMidi(record.data, record.name);
+            }
+          });
+        });
+
+        // Hover tooltip
+        var tooltipTimer = null;
+        item.addEventListener('mouseenter', function (e) {
+          tooltipTimer = setTimeout(function () {
+            var meta = '';
+            meta += f.name + '\n';
+            meta += 'Type: MIDI Audio\n';
+            meta += 'Size: ' + formatFileSize(f.size);
+            midiFolderTooltip.textContent = meta;
+            midiFolderTooltip.style.display = 'block';
+            midiFolderTooltip.style.left = (e.clientX + 14) + 'px';
+            midiFolderTooltip.style.top = (e.clientY + 14) + 'px';
+          }, 500);
+        });
+        item.addEventListener('mousemove', function (e) {
+          if (midiFolderTooltip.style.display === 'block') {
+            midiFolderTooltip.style.left = (e.clientX + 14) + 'px';
+            midiFolderTooltip.style.top = (e.clientY + 14) + 'px';
+          }
+        });
+        item.addEventListener('mouseleave', function () {
+          clearTimeout(tooltipTimer);
+          midiFolderTooltip.style.display = 'none';
+        });
+
+        // Delete key
+        item.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Delete' && midiFolderSelected === f.id) {
+            deleteMidiFile(f.id).then(function () { refreshMidiFolder(); });
+          }
+        });
+        item.tabIndex = 0;
+
+        midiFolderList.appendChild(item);
+      });
+      midiFolderStatus.textContent = files.length ? files.length + ' object(s)' : 'Drag .mid files here';
+    });
+  }
+
+  // Create folder window on load
+  createMidiFolder();
+
   // Mode HUD: intentional, legible, minimal
   let hudEl = null;
+  let hudStatusEl = null;
   function createHud() {
     hudEl = document.createElement('div');
     hudEl.setAttribute('aria-live', 'polite');
     hudEl.className = 'hud-top-menu';
+
+    // ── Persistent menu items with dropdown interactions ──
+    var menuWrap = document.createElement('span');
+    menuWrap.className = 'hud-menu-items';
+
+    var menuDefs = [
+      { html: '<span class="hud-accel">F</span>ile', getItems: function () {
+        return [
+          { label: 'Import MIDI\u2026', action: function () { folderFileInput.click(); } },
+          '---',
+          { label: 'MIDI Library', action: function () {
+            if (midiFolderEl) {
+              if (midiFolderEl.style.display === 'none') {
+                midiFolderEl.style.display = '';
+                midiFolderMinimized = false;
+                var b = midiFolderEl.querySelector('.w95-window-body');
+                if (b) b.style.display = '';
+              } else { midiFolderEl.style.display = 'none'; }
+            }
+          } },
+          '---',
+          { label: 'Help', shortcut: '?', action: function () { toggleHelp(); } }
+        ];
+      } },
+      { html: '<span class="hud-accel">E</span>dit', getItems: function () {
+        return [
+          { label: 'Stop Sustained', shortcut: 'Esc', action: function () { stopAllSustained(); showModeToast('Sustain cleared'); } },
+          '---',
+          { label: 'Volume Up', shortcut: '=', action: function () {
+            masterVolume = Math.min(1, masterVolume + 0.08);
+            if (masterGain) masterGain.gain.value = masterVolume;
+            if (drumGain) drumGain.gain.value = masterVolume;
+            showModeToast('Vol ' + (masterVolume * 100 | 0) + '%');
+          } },
+          { label: 'Volume Down', shortcut: '\u2013', action: function () {
+            masterVolume = Math.max(0.05, masterVolume - 0.08);
+            if (masterGain) masterGain.gain.value = masterVolume;
+            if (drumGain) drumGain.gain.value = masterVolume;
+            showModeToast('Vol ' + (masterVolume * 100 | 0) + '%');
+          } }
+        ];
+      } },
+      { html: '<span class="hud-accel">V</span>iew', getItems: function () {
+        return [
+          { label: 'MIDI Library', action: function () {
+            if (midiFolderEl) {
+              if (midiFolderEl.style.display === 'none') {
+                midiFolderEl.style.display = '';
+                midiFolderMinimized = false;
+                var b = midiFolderEl.querySelector('.w95-window-body');
+                if (b) b.style.display = '';
+              } else { toggleMidiFolder(); }
+            }
+          } },
+          { label: 'Reset Zoom', shortcut: 'Esc', action: function () { zoomLevel = 1.0; showModeToast('Zoom reset'); } },
+          '---',
+          { label: 'Freeze Visual', shortcut: '5', action: function () { visualFreezeUntil = performance.now() * 0.001 + 2; showModeToast('Freeze 2s'); } },
+          '---',
+          { label: 'Help', shortcut: '?', action: function () { toggleHelp(); } }
+        ];
+      } },
+      { html: '<span class="hud-accel">S</span>ynth', getItems: function () {
+        return [
+          { label: 'Microphone', shortcut: '1', checked: micEnabled, action: function () { toggleMic(); } },
+          { label: 'Arpeggiator', shortcut: '2', checked: arpEnabled, action: function () { toggleArp(); } },
+          { label: 'Gyroscope', shortcut: '3', checked: gyroEnabled, action: function () { initGyro(); } },
+          { label: 'Ambient', shortcut: '4', checked: ambientMode, action: function () { ambientMode ? stopAmbient() : startAmbient(); } },
+          '---',
+          { label: 'Harmony: ' + HARMONY_MODE_LABEL[getHarmonyMode()], shortcut: '6', action: function () {
+            var hm = cycleHarmonyMode();
+            showModeToast('Harmony ' + HARMONY_MODE_LABEL[hm]);
+          } }
+        ];
+      } },
+      { html: 'F<span class="hud-accel">X</span>', getItems: function () {
+        return [
+          { label: 'Pixel: ' + PIXEL_MODE_LABELS[pixelModeIdx], shortcut: '7', action: function () { showModeToast('Pixel ' + cyclePixelMode().toUpperCase()); } },
+          { label: 'Analog: ' + ANALOG_MODE_LABELS[analogModeIdx], shortcut: '8', action: function () { showModeToast('Analog ' + cycleAnalogMode().toUpperCase()); } },
+          { label: 'Text: ' + TEXT_MODE_LABELS[textModeIdx], shortcut: '9', action: function () { showModeToast('Text ' + cycleTextMode().toUpperCase()); } }
+        ];
+      } },
+      { html: '<span class="hud-accel">M</span>IDI', getItems: function () {
+        return [
+          { label: 'Import MIDI\u2026', action: function () { folderFileInput.click(); } },
+          { label: 'MIDI Library', action: function () {
+            if (midiFolderEl) {
+              if (midiFolderEl.style.display === 'none') {
+                midiFolderEl.style.display = '';
+                midiFolderMinimized = false;
+                var b = midiFolderEl.querySelector('.w95-window-body');
+                if (b) b.style.display = '';
+              } else { toggleMidiFolder(); }
+            }
+          } }
+        ];
+      } },
+      { html: '<span class="hud-accel">T</span>ools', getItems: function () {
+        return [
+          { label: 'Sustain Pedal', shortcut: 'Space', checked: sustainPedalHeld, action: function () {
+            sustainPedalHeld = !sustainPedalHeld;
+            if (!sustainPedalHeld) stopAllSustained();
+            showModeToast(sustainPedalHeld ? 'Sustain ON' : 'Sustain off');
+          } },
+          { label: 'Freeze Visual', shortcut: '5', action: function () {
+            visualFreezeUntil = performance.now() * 0.001 + 2;
+            showModeToast('Freeze 2s');
+          } },
+          '---',
+          { label: 'Help', shortcut: '?', action: function () { toggleHelp(); } }
+        ];
+      } }
+    ];
+
+    menuDefs.forEach(function (def) {
+      var item = document.createElement('span');
+      item.className = 'hud-menu-item';
+      item.innerHTML = def.html;
+      item.addEventListener('click', function (e) {
+        e.stopPropagation();
+        showDropdown(item, def.getItems());
+      });
+      menuWrap.appendChild(item);
+    });
+
+    hudStatusEl = document.createElement('span');
+    hudStatusEl.className = 'hud-status-bar';
+
+    hudEl.appendChild(menuWrap);
+    hudEl.appendChild(hudStatusEl);
     document.body.appendChild(hudEl);
   }
   function updateHud() {
@@ -6172,16 +6752,13 @@ import { initMidiPlayer } from './midi-player.js';
     modes.push(`zoom ${zoomLevel.toFixed(2)}x`);
     if (mixAutoGain) modes.push(`mix ${(mixAutoGain.gain.value * 100 | 0)}%`);
     if (headTrackingActive) modes.push(`head ${headZone.toLowerCase()}`);
-    if (chordCount > 1) modes.push('chord ×' + chordCount);
+    if (chordCount > 1) modes.push('chord \u00D7' + chordCount);
     if (activeLeadVoices > 0) modes.push('voices ' + activeLeadVoices);
     if (midiPlaybackActive || midiPlaybackDuration > 0.01) {
       modes.push(`midi ${midiPlaybackSpeed.toFixed(2)}x ${midiPlaybackPosition.toFixed(1)}/${midiPlaybackDuration.toFixed(1)}s`);
       if (midiPlaybackPolyphony > 0) modes.push('m-poly ' + midiPlaybackPolyphony);
     }
-    const menuItems = ['<span class="hud-accel">F</span>ile','<span class="hud-accel">E</span>dit','<span class="hud-accel">V</span>iew','<span class="hud-accel">S</span>ynth','F<span class="hud-accel">X</span>','<span class="hud-accel">M</span>IDI','<span class="hud-accel">T</span>ools'];
-    const menuLead = '<span class="hud-menu-items">' + menuItems.map(m => `<span class="hud-menu-item">${m}</span>`).join('') + '</span>';
-    const statusStr = '<span class="hud-status-bar">' + modes.join(' \u00B7 ') + '</span>';
-    hudEl.innerHTML = menuLead + statusStr;
+    hudStatusEl.textContent = modes.join(' \u00B7 ');
   }
 
   function createHelpOverlay() {
@@ -7953,7 +8530,7 @@ import { initMidiPlayer } from './midi-player.js';
     if (!keysigEl) createKeysigDisplay();
     if (!waveformEl) createWaveform();
     if (!edgeLinesEl) createEdgeLines();
-    if (!orbitEl) createOrbitRing();
+    if (!beatStepEl) createBeatStepViz();
     if (!freqLabelEl) createFreqLabel();
     if (!polycountEl) createPolycount();
     if (!tickerBars.length) createTickerBars();
@@ -8137,6 +8714,8 @@ import { initMidiPlayer } from './midi-player.js';
         waveformCtx.clearRect(0, 0, 80, 140);
         waveformCtx.strokeStyle = 'hsla(' + hueDeg + ',60%,82%,' + (0.5 + impactFlash * 0.45 + kickFlash * 0.20) + ')';
         waveformCtx.lineWidth = 1.5 + kickFlash * 4;
+        waveformCtx.lineCap = 'round';
+        waveformCtx.lineJoin = 'round';
         waveformCtx.beginPath();
         var step = Math.max(2, (bufLen / 70) | 0);
         for (var wi = 0; wi < 70; wi++) {
@@ -8152,12 +8731,31 @@ import { initMidiPlayer } from './midi-player.js';
       // ── Edge lines (throttled to even frames) ──
       if (isEvenFrame) edgeLinesEl.style.opacity = Math.min(0.85, 0.20 + impactFlash * 0.45 + kickFlash * 0.18 + audioEnergy * 0.12);
 
-      // ── Orbit ring (throttled to even frames, cached refs) ──
-      if (isEvenFrame) orbitEl.style.opacity = Math.min(0.80, 0.25 + audioEnergy * 0.30 + impactFlash * 0.25 + kickFlash * 0.12);
-      if (y2kFrame % 8 === 0 && orbitRingRef) {
-        orbitRingRef.style.stroke = 'hsla(' + hueDeg + ',35%,70%,0.15)';
-        var dotFill = 'hsla(' + hueDeg + ',55%,80%,0.65)';
-        for (var od = 0; od < orbitDotRefs.length; od++) orbitDotRefs[od].style.fill = dotFill;
+      // ── Beat Step Visualizer ──
+      {
+        var showBeatViz = midiPlaybackActive;
+        if (showBeatViz && !beatStepEl.classList.contains('active')) beatStepEl.classList.add('active');
+        else if (!showBeatViz && beatStepEl.classList.contains('active')) { beatStepEl.classList.remove('active'); lastBeatIndex = -1; }
+        if (showBeatViz) {
+          var bpm = midiSourceBpm || 120;
+          var beatDur = 60 / bpm;
+          var beatsPerBar = midiBeatsPerBar || 4;
+          // rebuild bars if time signature changed
+          if (beatStepDots.length !== beatsPerBar) rebuildBeatDots(beatsPerBar);
+          var barDur = beatDur * beatsPerBar;
+          var posInBar = midiPlaybackPosition % barDur;
+          if (posInBar < 0) posInBar += barDur;
+          var beatIdx = Math.min(Math.floor(posInBar / beatDur), beatsPerBar - 1);
+          if (beatIdx !== lastBeatIndex) {
+            for (var bi = 0; bi < beatStepDots.length; bi++) {
+              var bar = beatStepDots[bi];
+              bar.classList.remove('hit', 'trail');
+              if (bi === beatIdx) bar.classList.add('hit');
+              else if (bi === (beatIdx - 1 + beatsPerBar) % beatsPerBar) bar.classList.add('trail');
+            }
+            lastBeatIndex = beatIdx;
+          }
+        }
       }
 
       // ── Frequency label (event-driven, only on note change) ──
