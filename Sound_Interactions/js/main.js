@@ -1379,6 +1379,27 @@ import { initMidiPlayer } from './midi-player.js';
   let dotsEl = null;
   let sysIdEl = null;
   let lastChordName = '';
+  let noiseEl = null;
+  let crtLinesEl = null;
+  let glitchBarEl = null;
+  let glitchBarTimer = 0;
+  let velocityEl = null;
+  let velocityFillEl = null;
+  let velocityLabelEl = null;
+  let keysigEl = null;
+  let keysigSubEl = null;
+  let lastKeysigName = '';
+  let waveformEl = null;
+  let waveformCanvas = null;
+  let waveformCtx = null;
+  let edgeLinesEl = null;
+  let orbitEl = null;
+  let freqLabelEl = null;
+  let freqHzEl = null;
+  let polycountEl = null;
+  let polycountLabelEl = null;
+  let tickerBars = [];
+  let lastFreqHz = 0;
   let lastKickImpact = -10;
   let lastDrumMinorImpact = -10;
   // Per-drum-type impact timestamps for distinct visual treatments
@@ -3900,10 +3921,10 @@ import { initMidiPlayer } from './midi-player.js';
     crosshairEl = document.createElement('div');
     crosshairEl.style.cssText = 'position:fixed;inset:0;z-index:1370;pointer-events:none;opacity:0.08';
     const positions = [
-      { top: '33.3%', left: '33.3%' },
-      { top: '33.3%', left: '66.6%' },
-      { top: '66.6%', left: '33.3%' },
-      { top: '66.6%', left: '66.6%' }
+      { top: '33.3%', left: '33.3%', coord: '0.33 0.33' },
+      { top: '33.3%', left: '66.6%', coord: '0.66 0.33' },
+      { top: '66.6%', left: '33.3%', coord: '0.33 0.66' },
+      { top: '66.6%', left: '66.6%', coord: '0.66 0.66' }
     ];
     positions.forEach(p => {
       const d = document.createElement('div');
@@ -3911,6 +3932,7 @@ import { initMidiPlayer } from './midi-player.js';
       d.style.top = p.top;
       d.style.left = p.left;
       d.textContent = '+';
+      d.setAttribute('data-coord', p.coord);
       crosshairEl.appendChild(d);
     });
     document.body.appendChild(crosshairEl);
@@ -3961,6 +3983,9 @@ import { initMidiPlayer } from './midi-player.js';
   function createChordDisplay() {
     chordEl = document.createElement('div');
     chordEl.id = 'y2k-chord';
+    var chordNameSpan = document.createElement('span');
+    chordNameSpan.className = 'y2k-chord-name';
+    chordEl.appendChild(chordNameSpan);
     chordSubEl = document.createElement('div');
     chordSubEl.id = 'y2k-chord-sub';
     chordEl.appendChild(chordSubEl);
@@ -4026,6 +4051,110 @@ import { initMidiPlayer } from './midi-player.js';
     sysIdEl.id = 'y2k-sysid';
     sysIdEl.innerHTML = '<span>SONIC.SYS v2.6.0</span><span>BUILD 2026.02</span><span>48KHZ \u00B7 32BIT</span>';
     document.body.appendChild(sysIdEl);
+  }
+
+  function createCrtOverlays() {
+    noiseEl = document.createElement('div');
+    noiseEl.id = 'y2k-noise';
+    document.body.appendChild(noiseEl);
+    crtLinesEl = document.createElement('div');
+    crtLinesEl.id = 'y2k-crt-lines';
+    document.body.appendChild(crtLinesEl);
+    glitchBarEl = document.createElement('div');
+    glitchBarEl.id = 'y2k-glitch-bar';
+    document.body.appendChild(glitchBarEl);
+  }
+
+  function createVelocityMeter() {
+    velocityEl = document.createElement('div');
+    velocityEl.id = 'y2k-velocity';
+    velocityFillEl = document.createElement('div');
+    velocityFillEl.id = 'y2k-velocity-fill';
+    velocityLabelEl = document.createElement('div');
+    velocityLabelEl.id = 'y2k-velocity-label';
+    velocityLabelEl.textContent = 'VEL';
+    velocityEl.appendChild(velocityFillEl);
+    velocityEl.appendChild(velocityLabelEl);
+    document.body.appendChild(velocityEl);
+  }
+
+  function createKeysigDisplay() {
+    keysigEl = document.createElement('div');
+    keysigEl.id = 'y2k-keysig';
+    var keysigNameSpan = document.createElement('span');
+    keysigNameSpan.className = 'y2k-keysig-name';
+    keysigEl.appendChild(keysigNameSpan);
+    keysigSubEl = document.createElement('div');
+    keysigSubEl.id = 'y2k-keysig-sub';
+    keysigEl.appendChild(keysigSubEl);
+    document.body.appendChild(keysigEl);
+  }
+
+  function createWaveform() {
+    waveformEl = document.createElement('div');
+    waveformEl.id = 'y2k-waveform';
+    waveformCanvas = document.createElement('canvas');
+    waveformCanvas.width = 80;
+    waveformCanvas.height = 140;
+    waveformEl.appendChild(waveformCanvas);
+    document.body.appendChild(waveformEl);
+    waveformCtx = waveformCanvas.getContext('2d');
+  }
+
+  function createEdgeLines() {
+    edgeLinesEl = document.createElement('div');
+    edgeLinesEl.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:1356';
+    var sides = ['left', 'right', 'top', 'bottom'];
+    sides.forEach(function(s) {
+      var d = document.createElement('div');
+      d.className = 'y2k-edge-line y2k-edge-' + s;
+      edgeLinesEl.appendChild(d);
+    });
+    document.body.appendChild(edgeLinesEl);
+  }
+
+  function createOrbitRing() {
+    orbitEl = document.createElement('div');
+    orbitEl.id = 'y2k-orbit';
+    orbitEl.innerHTML = '<svg viewBox="0 0 64 64"><g id="y2k-orbit-group"><circle id="y2k-orbit-ring" cx="32" cy="32" r="28"/><circle class="y2k-orbit-dot" cx="32" cy="4" r="2"/><circle class="y2k-orbit-dot" cx="60" cy="32" r="1.5"/><circle class="y2k-orbit-dot" cx="32" cy="60" r="1.2"/></g></svg>';
+    document.body.appendChild(orbitEl);
+  }
+
+  function createFreqLabel() {
+    freqLabelEl = document.createElement('div');
+    freqLabelEl.id = 'y2k-freq-label';
+    freqHzEl = document.createElement('span');
+    freqHzEl.id = 'y2k-freq-hz';
+    freqLabelEl.appendChild(freqHzEl);
+    freqLabelEl.appendChild(document.createTextNode('Hz'));
+    document.body.appendChild(freqLabelEl);
+  }
+
+  function createPolycount() {
+    polycountEl = document.createElement('div');
+    polycountEl.id = 'y2k-polycount';
+    polycountLabelEl = document.createElement('span');
+    polycountLabelEl.id = 'y2k-polycount-label';
+    polycountLabelEl.textContent = 'VOICES';
+    polycountEl.appendChild(document.createTextNode('0'));
+    polycountEl.appendChild(polycountLabelEl);
+    document.body.appendChild(polycountEl);
+  }
+
+  function createTickerBars() {
+    tickerBars = [];
+    for (var i = 0; i < 6; i++) {
+      var bar = document.createElement('div');
+      bar.className = 'y2k-ticker-bar';
+      bar.style.top = (20 + i * 10) + '%';
+      bar.style.animationDelay = (i * 0.15) + 's';
+      document.body.appendChild(bar);
+      tickerBars.push(bar);
+    }
+  }
+
+  function midiToFreq(midi) {
+    return 440 * Math.pow(2, (midi - 69) / 12);
   }
 
   function updateDatastreamContent() {
@@ -7425,48 +7554,79 @@ import { initMidiPlayer } from './midi-player.js';
     if (!arcEl) createArcRing();
     if (!dotsEl) createBreathingDots();
     if (!sysIdEl) createSysId();
+    if (!noiseEl) createCrtOverlays();
+    if (!velocityEl) createVelocityMeter();
+    if (!keysigEl) createKeysigDisplay();
+    if (!waveformEl) createWaveform();
+    if (!edgeLinesEl) createEdgeLines();
+    if (!orbitEl) createOrbitRing();
+    if (!freqLabelEl) createFreqLabel();
+    if (!polycountEl) createPolycount();
+    if (!tickerBars.length) createTickerBars();
 
+    // ═══ Y2K HUD: OPTIMIZED per-frame updates ═══
+    // Strategy: batch reads, skip unchanged, reuse buffers, reduce DOM writes
     {
       const hueDeg = Math.round(currentKeyHue * 360) % 360;
-      // Bracket frame: breathe + flash
-      const bracketAlpha = Math.min(0.85, 0.25 + impactFlash * 0.35 + 0.06 * (0.5 + 0.5 * syncA));
-      const bracketScale = (1.0 + impactFlash * 0.04).toFixed(4);
-      bracketFrameEl.style.opacity = bracketAlpha.toFixed(3);
-      const brackets = bracketFrameEl.children;
-      for (let i = 0; i < brackets.length; i++) {
-        brackets[i].style.borderColor = 'hsla(' + hueDeg + ',38%,82%,' + Math.min(0.6, bracketAlpha).toFixed(3) + ')';
-        brackets[i].style.transform = 'scale(' + bracketScale + ')';
-      }
-      // Crosshairs: visible when playing
-      const crossAlpha = (keysPressed.size > 0 || midiPlaybackActive) ? 0.28 + impactFlash * 0.22 : 0.08;
-      crosshairEl.style.opacity = crossAlpha.toFixed(3);
-      // Scanline: flash on beat
-      scanlineEl.style.opacity = (0.35 + impactFlash * 0.35).toFixed(3);
-      // Datastream: audio energy glow
-      const dsAlpha = Math.min(0.55, 0.22 + audioEnergy * 0.18 + impactFlash * 0.12);
-      datastreamEl.style.opacity = dsAlpha.toFixed(3);
-      // Gradient corners: hue-reactive
-      const gcAlpha = Math.min(0.12, 0.03 + impactFlash * 0.04 + audioEnergy * 0.02);
-      gradientCornersEl.children[0].style.color = 'hsla(' + hueDeg + ',52%,68%,1)';
-      gradientCornersEl.children[1].style.color = 'hsla(' + ((hueDeg + 180) % 360) + ',48%,62%,1)';
-      gradientCornersEl.style.opacity = gcAlpha.toFixed(4);
+      const isPlaying = keysPressed.size > 0 || midiPlaybackActive;
+      const activeNotes = collectOrderedActiveNotes();
+      const noteCount = activeNotes.length;
+      // Frame counter for throttled updates (skip every other frame for heavy ops)
+      const y2kFrame = Math.floor(now * 60);
+      const isEvenFrame = (y2kFrame & 1) === 0;
 
-      // Spectrum analyzer: 5 bars from analyser bins
+      // ── Bracket frame (update every frame — cheap, 1 parent opacity + transform) ──
+      bracketFrameEl.style.opacity = Math.min(0.95, 0.35 + impactFlash * 0.45 + 0.08 * (0.5 + 0.5 * syncA));
+      if (impactFlash > 0.3) {
+        const jx = (Math.random() - 0.5) * 4;
+        const s = 1.0 + impactFlash * 0.06;
+        bracketFrameEl.style.transform = 'scale(' + s + ') translateX(' + jx + 'px)';
+      } else {
+        bracketFrameEl.style.transform = '';
+      }
+      // Color update only when hue changes (throttled)
+      if (isEvenFrame) {
+        const bc = 'hsla(' + hueDeg + ',45%,85%,0.7)';
+        for (let i = 0; i < 4; i++) bracketFrameEl.children[i].style.borderColor = bc;
+      }
+
+      // ── Crosshairs (container opacity only — children use CSS animation) ──
+      crosshairEl.style.opacity = isPlaying ? 0.45 + impactFlash * 0.4 : 0.12;
+
+      // ── Scanline (1 write) ──
+      scanlineEl.style.opacity = 0.55 + impactFlash * 0.4;
+
+      // ── Datastream (1 opacity write + CA only on beat) ──
+      datastreamEl.style.opacity = Math.min(0.7, 0.32 + audioEnergy * 0.25 + impactFlash * 0.18);
+
+      // ── Gradient corners (throttle color to every 3rd frame — blur is very static) ──
+      gradientCornersEl.style.opacity = Math.min(0.2, 0.06 + impactFlash * 0.07 + audioEnergy * 0.05);
+      if (y2kFrame % 3 === 0) {
+        gradientCornersEl.children[0].style.color = 'hsl(' + hueDeg + ',60%,72%)';
+        gradientCornersEl.children[1].style.color = 'hsl(' + ((hueDeg + 180) % 360) + ',55%,66%)';
+      }
+
+      // ── Spectrum analyzer (5 bars — height only, background throttled) ──
       if (specBars.length) {
-        const bins = [bassLevel, (bassLevel + midLevel) * 0.5, midLevel, (midLevel + trebleLevel) * 0.5, trebleLevel];
-        const specAlpha = Math.min(0.65, 0.2 + audioEnergy * 0.35 + impactFlash * 0.1);
-        spectrumEl.style.opacity = specAlpha.toFixed(3);
-        for (let i = 0; i < 5; i++) {
-          const h = Math.max(2, Math.round(bins[i] * 30 + impactFlash * 6));
-          specBars[i].style.height = h + 'px';
-          specBars[i].style.background = 'hsla(' + ((hueDeg + i * 28) % 360) + ',55%,72%,0.7)';
+        spectrumEl.style.opacity = Math.min(0.85, 0.35 + audioEnergy * 0.4 + impactFlash * 0.15);
+        const bl = bassLevel, ml = midLevel, tl = trebleLevel;
+        const bins0 = bl, bins1 = (bl + ml) * 0.5, bins2 = ml, bins3 = (ml + tl) * 0.5, bins4 = tl;
+        specBars[0].style.height = Math.max(3, (bins0 * 46 + impactFlash * 12) | 0) + 'px';
+        specBars[1].style.height = Math.max(3, (bins1 * 46 + impactFlash * 12) | 0) + 'px';
+        specBars[2].style.height = Math.max(3, (bins2 * 46 + impactFlash * 12) | 0) + 'px';
+        specBars[3].style.height = Math.max(3, (bins3 * 46 + impactFlash * 12) | 0) + 'px';
+        specBars[4].style.height = Math.max(3, (bins4 * 46 + impactFlash * 12) | 0) + 'px';
+        // Color update throttled to every 4th frame
+        if (y2kFrame % 4 === 0) {
+          for (let i = 0; i < 5; i++) {
+            specBars[i].style.background = 'hsla(' + ((hueDeg + i * 30) % 360) + ',65%,72%,0.85)';
+          }
         }
       }
 
-      // Chord detection & display
+      // ── Chord detection (only on note change — already cached via lastChordName) ──
       {
-        const notes = collectOrderedActiveNotes();
-        const chord = detectChord(notes);
+        const chord = detectChord(activeNotes);
         const chordName = chord ? chord.name : '';
         if (chordName !== lastChordName) {
           lastChordName = chordName;
@@ -7474,40 +7634,166 @@ import { initMidiPlayer } from './midi-player.js';
             chordEl.style.opacity = '1';
             chordEl.childNodes[0].textContent = chord.name;
             chordSubEl.textContent = chord.sub;
-            chordEl.style.color = 'hsla(' + hueDeg + ',35%,88%,0.55)';
+            chordEl.style.color = 'hsla(' + hueDeg + ',42%,92%,0.8)';
           } else {
             chordEl.style.opacity = '0';
           }
         }
       }
 
-      // Arc ring: beat pulse or MIDI progress
+      // ── Arc ring (2 writes: dashoffset + opacity) ──
       {
-        const circ = 2 * Math.PI * 19;
-        let pct = 0;
-        let label = '';
+        const circ = 119.38; // precomputed 2 * PI * 19
+        let pct, label;
         if (typeof midiPlaybackProgress === 'number' && midiPlaybackActive) {
           pct = midiPlaybackProgress;
-          label = Math.round(pct * 100) + '%';
+          label = ((pct * 100) | 0) + '%';
         } else {
           pct = 0.5 + 0.5 * syncA;
           label = 'SYNC';
         }
         arcFgEl.style.strokeDashoffset = (circ * (1 - pct)).toFixed(1);
-        arcFgEl.style.stroke = 'hsla(' + hueDeg + ',45%,75%,0.5)';
-        arcLabelEl.textContent = label;
-        arcEl.style.opacity = (0.22 + impactFlash * 0.2).toFixed(3);
+        arcEl.style.opacity = 0.4 + impactFlash * 0.35;
+        // Text + color update throttled
+        if (isEvenFrame) {
+          arcLabelEl.textContent = label;
+          arcFgEl.style.stroke = 'hsla(' + hueDeg + ',55%,78%,0.7)';
+        }
       }
 
-      // Breathing dots: hue tint
-      if (dotsEl) {
-        const dotAlpha = 0.15 + audioEnergy * 0.2;
-        dotsEl.style.opacity = Math.min(0.6, dotAlpha).toFixed(3);
+      // ── Breathing dots (1 parent opacity write) ──
+      dotsEl.style.opacity = Math.min(0.8, 0.22 + audioEnergy * 0.35 + impactFlash * 0.12);
+
+      // ── System ID (1 opacity write, glitch text-shadow only on strong beat) ──
+      {
+        const sysAlpha = isPlaying ? '0.50' : '0.65';
+        sysIdEl.style.opacity = sysAlpha;
+        if (impactFlash > 0.45) {
+          const r = Math.random() * 3;
+          sysIdEl.style.textShadow = (2 + r) + 'px 0 rgba(255,50,80,0.35),' + (-2 - r) + 'px 0 rgba(50,200,255,0.35),0 0 10px rgba(120,180,255,0.18)';
+        }
       }
 
-      // System ID: subtle fade when active
-      if (sysIdEl) {
-        sysIdEl.style.opacity = (keysPressed.size > 0 || midiPlaybackActive) ? '0.35' : '0.6';
+      // ── CRT Noise (1 opacity write, throttled) ──
+      if (isEvenFrame) {
+        noiseEl.style.opacity = 0.04 + impactFlash * 0.07;
+      }
+
+      // ── Glitch bar (event-driven, not per-frame) ──
+      glitchBarTimer -= 0.016;
+      if (impactFlash > 0.45 && glitchBarTimer <= 0 && Math.random() < 0.45) {
+        glitchBarEl.style.cssText = 'position:fixed;left:0;right:0;z-index:1392;pointer-events:none;mix-blend-mode:screen;background:rgba(255,255,255,0.08);top:' + (Math.random() * 80 + 10) + '%;height:' + (2 + Math.random() * 8) + 'px;opacity:' + (0.06 + Math.random() * 0.14) + ';transform:translateX(' + ((Math.random() - 0.5) * 10) + 'px)';
+        glitchBarTimer = 0.06 + Math.random() * 0.1;
+      } else if (glitchBarTimer <= 0 && glitchBarEl.style.height !== '0px') {
+        glitchBarEl.style.opacity = '0';
+        glitchBarEl.style.height = '0';
+      }
+
+      // ── Velocity meter (2 writes: height + opacity) ──
+      {
+        let avgVel = 0;
+        if (noteCount > 0) {
+          let sum = 0;
+          for (let i = 0; i < noteCount; i++) sum += (activeNotes[i].velocity || 0.7);
+          avgVel = sum / noteCount;
+        }
+        velocityFillEl.style.height = ((avgVel * 100) | 0) + '%';
+        velocityEl.style.opacity = isPlaying ? 0.5 + impactFlash * 0.3 : 0.15;
+        // Gradient color throttled to every 6th frame (expensive to parse)
+        if (y2kFrame % 6 === 0) {
+          velocityFillEl.style.background = 'linear-gradient(0deg,hsla(' + hueDeg + ',60%,55%,0.6),hsla(' + ((hueDeg + 40) % 360) + ',70%,75%,0.8))';
+        }
+      }
+
+      // ── Key signature (event-driven, updates only on note change) ──
+      {
+        let rootDisplay = '';
+        let subDisplay = '';
+        if (noteCount > 0) {
+          rootDisplay = NOTE_NAMES[activeNotes[0].midi % 12];
+          subDisplay = 'OCT ' + (Math.floor(activeNotes[0].midi / 12) - 1);
+        }
+        if (rootDisplay !== lastKeysigName) {
+          lastKeysigName = rootDisplay;
+          if (rootDisplay) {
+            keysigEl.style.opacity = '0.7';
+            keysigEl.childNodes[0].textContent = rootDisplay;
+            keysigSubEl.textContent = subDisplay;
+          } else {
+            keysigEl.style.opacity = '0';
+          }
+        }
+      }
+
+      // ── Waveform (throttled to every 2nd frame, reuse buffer, NO shadow) ──
+      if (isEvenFrame && waveformCtx && analyser) {
+        var bufLen = analyser.fftSize;
+        if (!waveformCtx._buf || waveformCtx._buf.length !== bufLen) {
+          waveformCtx._buf = new Uint8Array(bufLen);
+        }
+        analyser.getByteTimeDomainData(waveformCtx._buf);
+        waveformCtx.clearRect(0, 0, 80, 140);
+        waveformCtx.strokeStyle = 'hsla(' + hueDeg + ',50%,75%,0.5)';
+        waveformCtx.lineWidth = 1.5;
+        waveformCtx.beginPath();
+        var step = Math.max(2, (bufLen / 70) | 0);
+        for (var wi = 0; wi < 70; wi++) {
+          var v = waveformCtx._buf[wi * step] * 0.0078125 - 1.0; // /128.0
+          var x = v * 32 + 40;
+          if (wi === 0) waveformCtx.moveTo(x, 0);
+          else waveformCtx.lineTo(x, wi * 2);
+        }
+        waveformCtx.stroke();
+        waveformEl.style.opacity = isPlaying ? 0.35 + audioEnergy * 0.35 : 0.12;
+      }
+
+      // ── Edge lines (1 parent opacity write only) ──
+      edgeLinesEl.style.opacity = Math.min(0.7, 0.2 + impactFlash * 0.35 + audioEnergy * 0.1);
+
+      // ── Orbit ring (1 parent opacity, color throttled) ──
+      orbitEl.style.opacity = 0.25 + audioEnergy * 0.3 + impactFlash * 0.15;
+      if (y2kFrame % 8 === 0) {
+        var orRing = orbitEl.querySelector('#y2k-orbit-ring');
+        if (orRing) orRing.style.stroke = 'hsla(' + hueDeg + ',35%,70%,0.15)';
+        var orDots = orbitEl.querySelectorAll('.y2k-orbit-dot');
+        var dotFill = 'hsla(' + hueDeg + ',55%,80%,0.65)';
+        for (var od = 0; od < orDots.length; od++) orDots[od].style.fill = dotFill;
+      }
+
+      // ── Frequency label (event-driven, only on note change) ──
+      if (noteCount > 0) {
+        var hz = midiToFreq(activeNotes[0].midi);
+        if (Math.abs(hz - lastFreqHz) > 0.5) {
+          lastFreqHz = hz;
+          freqHzEl.textContent = hz.toFixed(1);
+        }
+        freqLabelEl.style.opacity = '0.55';
+      } else if (freqLabelEl.style.opacity !== '0') {
+        freqLabelEl.style.opacity = '0';
+      }
+
+      // ── Polyphony count (event-driven) ──
+      if (noteCount > 0) {
+        polycountEl.childNodes[0].textContent = noteCount;
+        polycountEl.style.opacity = 0.4 + impactFlash * 0.3;
+      } else if (polycountEl.style.opacity !== '0') {
+        polycountEl.style.opacity = '0';
+      }
+
+      // ── Ticker bars (throttled to every 2nd frame) ──
+      if (isEvenFrame && tickerBars.length) {
+        var tBands = [bassLevel, bassLevel * 0.7 + midLevel * 0.3, midLevel, midLevel * 0.5 + trebleLevel * 0.5, trebleLevel, trebleLevel * 0.8];
+        for (var ti = 0; ti < 6; ti++) {
+          var tkLv = tBands[ti];
+          tickerBars[ti].style.width = (6 + tkLv * 22 + impactFlash * 8 | 0) + 'px';
+          tickerBars[ti].style.opacity = 0.15 + tkLv * 0.45;
+        }
+        // Color update even less frequently
+        if (y2kFrame % 12 === 0) {
+          for (var tc = 0; tc < 6; tc++) {
+            tickerBars[tc].style.background = 'hsla(' + ((hueDeg + tc * 25) % 360) + ',50%,72%,0.4)';
+          }
+        }
       }
     }
 

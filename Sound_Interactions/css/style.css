@@ -674,217 +674,589 @@ html, body {
 
 /* ═══ Y2K Design Elements ═══ */
 
-/* Corner Bracket Frame */
+/*
+ * LAYOUT MAP (avoid overlaps with note text at 72%/88% center)
+ * ┌─────────────────────────────────────────┐
+ * │ [SysID]              [KeySig] [Bracket] │  top 2-6%
+ * │                                         │
+ * │   +               +                     │  crosshairs 33%
+ * │            [Waveform right edge]         │  right edge 35-65%
+ * │                                         │
+ * │   +               +                     │  crosshairs 66%
+ * │ [Chord]                       [VelMtr]  │  left 62%, right 62%
+ * │         ═══ NOTE TEXT ═══               │  72% center
+ * │ [Spectrum]     [DataStream]    [ArcRing]│  bottom 4-8%
+ * │ [OrbitDots]    [EdgeLines]     [VHS]    │
+ * └─────────────────────────────────────────┘
+ */
+
+/* ── Global Glitch Keyframes ── */
+@keyframes y2k-glitch-shift {
+  0%, 92% { clip-path: inset(0 0 0 0); transform: translate(0, 0); }
+  93% { clip-path: inset(12% 0 65% 0); transform: translate(4px, 0); }
+  94% { clip-path: inset(58% 0 18% 0); transform: translate(-3px, 0); }
+  95% { clip-path: inset(0 0 0 0); transform: translate(0, 0); }
+  96% { clip-path: inset(25% 0 45% 0); transform: translate(5px, 1px); }
+  97% { clip-path: inset(0 0 0 0); transform: translate(0, 0); }
+}
+@keyframes y2k-flicker {
+  0%, 94%, 100% { opacity: var(--y2k-base-opacity, 0.5); }
+  95% { opacity: 0.02; }
+  96% { opacity: var(--y2k-base-opacity, 0.5); }
+  97% { opacity: 0.06; }
+  98% { opacity: var(--y2k-base-opacity, 0.5); }
+}
+@keyframes y2k-chromatic-shift {
+  0%, 88%, 100% { text-shadow: 0 0 12px currentColor; }
+  90% { text-shadow: 3px 0 0 rgba(255,0,80,0.7), -3px 0 0 rgba(0,200,255,0.7), 0 0 12px currentColor; }
+  92% { text-shadow: -2px 1px 0 rgba(255,0,80,0.5), 2px -1px 0 rgba(0,200,255,0.5), 0 0 12px currentColor; }
+  94% { text-shadow: 4px 0 0 rgba(255,0,80,0.8), -4px 0 0 rgba(0,200,255,0.8), 0 0 16px currentColor; }
+}
+@keyframes y2k-noise-bar {
+  0%, 100% { background-position: 0 0; }
+  10% { background-position: -5% 0; }
+  30% { background-position: 3% 0; }
+  50% { background-position: -8% 0; }
+  70% { background-position: 2% 0; }
+  90% { background-position: -3% 0; }
+}
+@keyframes y2k-edge-pulse {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.4; }
+}
+@keyframes y2k-orbit-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes y2k-waveform-drift {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.55; }
+}
+
+/* ── Corner Bracket Frame ── TOP-LEFT/RIGHT, BOTTOM-LEFT/RIGHT */
 .y2k-bracket {
   position: absolute;
-  width: 48px;
-  height: 48px;
-  border-color: rgba(180, 220, 255, 0.35);
+  width: 72px;
+  height: 72px;
+  border-color: rgba(180, 220, 255, 0.55);
   border-style: solid;
   border-width: 0;
+  will-change: transform, opacity;
+  contain: layout style;
 }
-.y2k-bracket-tl { top: 3.5%; left: 3.5%; border-top-width: 1px; border-left-width: 1px; }
-.y2k-bracket-tr { top: 3.5%; right: 3.5%; border-top-width: 1px; border-right-width: 1px; }
-.y2k-bracket-bl { bottom: 3.5%; left: 3.5%; border-bottom-width: 1px; border-left-width: 1px; }
-.y2k-bracket-br { bottom: 3.5%; right: 3.5%; border-bottom-width: 1px; border-right-width: 1px; }
+.y2k-bracket-tl { top: 2%; left: 2%; border-top-width: 2px; border-left-width: 2px; }
+.y2k-bracket-tr { top: 2%; right: 2%; border-top-width: 2px; border-right-width: 2px; }
+.y2k-bracket-bl { bottom: 2%; left: 2%; border-bottom-width: 2px; border-left-width: 2px; }
+.y2k-bracket-br { bottom: 2%; right: 2%; border-bottom-width: 2px; border-right-width: 2px; }
+/* Inner tick marks on brackets */
+.y2k-bracket::before {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.4;
+}
+.y2k-bracket-tl::before { top: 12px; left: 0; }
+.y2k-bracket-tr::before { top: 12px; right: 0; }
+.y2k-bracket-bl::before { bottom: 12px; left: 0; }
+.y2k-bracket-br::before { bottom: 12px; right: 0; }
+.y2k-bracket::after {
+  content: '';
+  position: absolute;
+  width: 1px;
+  height: 8px;
+  background: currentColor;
+  opacity: 0.4;
+}
+.y2k-bracket-tl::after { top: 0; left: 12px; }
+.y2k-bracket-tr::after { top: 0; right: 12px; }
+.y2k-bracket-bl::after { bottom: 0; left: 12px; }
+.y2k-bracket-br::after { bottom: 0; right: 12px; }
 
-/* Cross-hair Registration Marks */
+/* ── Cross-hair Registration Marks ── at 1/3 grid */
 .y2k-cross {
   position: absolute;
   transform: translate(-50%, -50%);
-  font: 300 14px/1 "Lucida Console", "Courier New", monospace;
-  color: rgba(180, 220, 255, 0.18);
-  text-shadow: 0 0 6px rgba(120, 190, 255, 0.12);
+  font: 300 22px/1 "Lucida Console", "Courier New", monospace;
+  color: rgba(200, 235, 255, 0.4);
+  text-shadow: 2px 0 0 rgba(255, 50, 80, 0.18), -2px 0 0 rgba(50, 200, 255, 0.18), 0 0 12px rgba(120, 190, 255, 0.25);
   pointer-events: none;
   mix-blend-mode: screen;
+  animation: y2k-chromatic-shift 4s ease-in-out infinite;
+}
+.y2k-cross::after {
+  content: attr(data-coord);
+  position: absolute;
+  left: 16px;
+  top: -3px;
+  font: 400 7px/1 "Lucida Console", monospace;
+  letter-spacing: 0.14em;
+  color: rgba(160, 210, 255, 0.22);
+  white-space: nowrap;
 }
 
-/* Horizontal Scan Line */
+/* ── Horizontal Scan Line ── full width CRT sweep */
 #y2k-scanline {
   position: fixed;
-  left: 8%;
-  right: 8%;
-  height: 1px;
+  left: 0;
+  right: 0;
+  height: 2px;
   top: 0;
   z-index: 1360;
   pointer-events: none;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(160, 220, 255, 0.06) 15%,
-    rgba(200, 240, 255, 0.22) 50%,
-    rgba(160, 220, 255, 0.06) 85%,
+    rgba(200, 240, 255, 0.06) 5%,
+    rgba(220, 250, 255, 0.5) 25%,
+    rgba(255, 255, 255, 0.7) 50%,
+    rgba(220, 250, 255, 0.5) 75%,
+    rgba(200, 240, 255, 0.06) 95%,
     transparent 100%
   );
-  box-shadow: 0 0 8px rgba(140, 210, 255, 0.12);
+  box-shadow: 0 0 24px rgba(140, 220, 255, 0.3), 0 0 6px rgba(255, 255, 255, 0.35);
   mix-blend-mode: screen;
   will-change: transform;
-  animation: y2k-scan-sweep 8.5s linear infinite;
+  animation: y2k-scan-sweep 5.5s linear infinite;
+}
+#y2k-scanline::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 8%, rgba(200, 240, 255, 0.18) 50%, transparent 92%);
+  opacity: 0.5;
 }
 @keyframes y2k-scan-sweep {
-  0%   { transform: translateY(95vh); opacity: 0; }
-  3%   { opacity: 0.6; }
-  92%  { opacity: 0.6; }
-  97%  { opacity: 0; }
-  100% { transform: translateY(5vh); opacity: 0; }
+  0%   { transform: translateY(100vh); opacity: 0; }
+  2%   { opacity: 0.85; }
+  48%  { opacity: 0.85; }
+  50%  { opacity: 0.12; }
+  52%  { opacity: 0.85; }
+  94%  { opacity: 0.85; }
+  98%  { opacity: 0; }
+  100% { transform: translateY(-2vh); opacity: 0; }
 }
 
-/* Micro-text Data Stream */
+/* ── Data Stream ── bottom strip, full width */
 #y2k-datastream {
   position: fixed;
-  bottom: 3.5%;
-  left: 3.5%;
-  right: 30%;
-  height: 14px;
+  bottom: 1.5%;
+  left: 2%;
+  right: 2%;
+  height: 16px;
   z-index: 1375;
   pointer-events: none;
   overflow: hidden;
   mix-blend-mode: screen;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%);
-  mask-image: linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, black 4%, black 96%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, black 4%, black 96%, transparent 100%);
 }
 .y2k-datastream-inner {
   white-space: nowrap;
-  font: 400 9px/14px "Lucida Console", "Courier New", monospace;
-  letter-spacing: 0.15em;
-  color: rgba(170, 215, 255, 0.32);
-  text-shadow: 0 0 6px rgba(120, 190, 255, 0.14);
-  animation: y2k-stream-scroll 28s linear infinite;
+  font: 400 9px/16px "Lucida Console", "Courier New", monospace;
+  letter-spacing: 0.2em;
+  color: rgba(200, 230, 255, 0.5);
+  text-shadow: 1px 0 0 rgba(255, 60, 80, 0.2), -1px 0 0 rgba(50, 210, 255, 0.2), 0 0 8px rgba(120, 190, 255, 0.25);
+  animation: y2k-stream-scroll 20s linear infinite;
 }
 @keyframes y2k-stream-scroll {
   0%   { transform: translateX(0%); }
   100% { transform: translateX(-50%); }
 }
 
-/* Gradient Mesh Corners */
+/* ── Gradient Mesh Corners ── atmospheric blurs (GPU-promoted) */
 .y2k-gradient-corner {
   position: absolute;
-  width: 45vw;
-  height: 45vh;
+  width: 55vw;
+  height: 55vh;
   border-radius: 50%;
-  filter: blur(80px);
   mix-blend-mode: screen;
-  opacity: 0.04;
+  opacity: 0.06;
   pointer-events: none;
   will-change: opacity;
+  transform: translateZ(0);
 }
 .y2k-gc-tl {
-  top: -12%;
-  left: -8%;
-  background: radial-gradient(circle, currentColor 0%, transparent 70%);
+  top: -22%;
+  left: -16%;
+  background: radial-gradient(circle, currentColor 0%, transparent 45%);
 }
 .y2k-gc-br {
-  bottom: -12%;
-  right: -8%;
-  background: radial-gradient(circle, currentColor 0%, transparent 70%);
+  bottom: -22%;
+  right: -16%;
+  background: radial-gradient(circle, currentColor 0%, transparent 45%);
 }
 
-/* Mini Spectrum Analyzer */
+/* ── Spectrum Analyzer ── BOTTOM-LEFT cluster */
 #y2k-spectrum {
   position: fixed;
-  bottom: 7.5%;
-  right: 3.5%;
+  bottom: 4.5%;
+  left: 2.5%;
   z-index: 1378;
   pointer-events: none;
   display: flex;
   align-items: flex-end;
-  gap: 3px;
-  height: 32px;
-  opacity: 0.3;
+  gap: 2px;
+  height: 48px;
+  opacity: 0.5;
   mix-blend-mode: screen;
 }
 .y2k-spec-bar {
   width: 4px;
   min-height: 2px;
   border-radius: 1px 1px 0 0;
-  transition: height 80ms ease-out, background 300ms;
+  transition: height 50ms ease-out;
   will-change: height;
 }
 
-/* Chord Type Display */
+/* ── Chord Display ── LEFT side, above note text */
 #y2k-chord {
   position: fixed;
-  bottom: 12%;
-  left: 3.5%;
+  bottom: 30%;
+  left: 2.5%;
   z-index: 1378;
   pointer-events: none;
-  font: 200 22px/1 "Lucida Console", "Courier New", monospace;
-  letter-spacing: 0.1em;
-  color: rgba(200, 230, 255, 0.5);
-  text-shadow: 0 0 18px rgba(120, 190, 255, 0.2);
+  font: 100 42px/1 "Lucida Console", "Courier New", monospace;
+  letter-spacing: 0.12em;
+  color: rgba(220, 240, 255, 0.75);
+  text-shadow: 3px 0 0 rgba(255, 40, 80, 0.3), -3px 0 0 rgba(40, 200, 255, 0.3), 0 0 32px rgba(120, 190, 255, 0.4);
   mix-blend-mode: screen;
   opacity: 0;
-  transition: opacity 0.25s;
+  transition: opacity 0.15s;
+  animation: y2k-glitch-shift 5s steps(1) infinite;
 }
+.y2k-chord-name { display: block; }
 #y2k-chord-sub {
-  font: 400 9px/1.4 "Lucida Console", "Courier New", monospace;
-  letter-spacing: 0.2em;
-  color: rgba(170, 210, 255, 0.35);
-  margin-top: 4px;
+  font: 400 9px/1.4 "Lucida Console", monospace;
+  letter-spacing: 0.3em;
+  color: rgba(180, 220, 255, 0.35);
+  margin-top: 6px;
+  text-shadow: none;
 }
 
-/* Arc Progress Ring */
+/* ── Arc Progress Ring ── BOTTOM-RIGHT */
 #y2k-arc {
   position: fixed;
-  bottom: 5.5%;
-  right: 12%;
-  width: 44px;
-  height: 44px;
+  bottom: 4%;
+  right: 2.5%;
+  width: 52px;
+  height: 52px;
   z-index: 1376;
   pointer-events: none;
-  opacity: 0.28;
+  opacity: 0.45;
   mix-blend-mode: screen;
+  transform: translateZ(0);
 }
 #y2k-arc svg { width: 100%; height: 100%; }
-#y2k-arc circle {
-  fill: none;
-  stroke-linecap: round;
-}
-.y2k-arc-bg { stroke: rgba(140, 200, 255, 0.08); stroke-width: 1.5; }
-.y2k-arc-fg { stroke: rgba(180, 220, 255, 0.45); stroke-width: 1.5; transition: stroke-dashoffset 120ms; }
+#y2k-arc circle { fill: none; stroke-linecap: round; }
+.y2k-arc-bg { stroke: rgba(140, 200, 255, 0.1); stroke-width: 1.5; }
+.y2k-arc-fg { stroke: rgba(180, 220, 255, 0.65); stroke-width: 2; transition: stroke-dashoffset 80ms; }
 #y2k-arc-label {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font: 600 7px/1 "Lucida Console", monospace;
-  letter-spacing: 0.08em;
-  color: rgba(180, 220, 255, 0.45);
+  font: 600 8px/1 "Lucida Console", monospace;
+  letter-spacing: 0.1em;
+  color: rgba(200, 235, 255, 0.55);
+  text-shadow: 0 0 8px rgba(120, 200, 255, 0.35);
 }
 
-/* Breathing Dots */
+/* ── Breathing Dots ── scattered, avoiding center */
 .y2k-dot {
   position: absolute;
   width: 3px;
   height: 3px;
   border-radius: 50%;
-  background: rgba(180, 220, 255, 0.3);
-  box-shadow: 0 0 6px rgba(140, 200, 255, 0.15);
+  background: rgba(200, 235, 255, 0.5);
+  box-shadow: 0 0 6px rgba(140, 210, 255, 0.3);
   mix-blend-mode: screen;
-  animation: y2k-dot-breathe 3.2s ease-in-out infinite;
-  will-change: opacity;
+  animation: y2k-dot-breathe 3s ease-in-out infinite;
+  will-change: opacity, transform;
+  contain: strict;
 }
 @keyframes y2k-dot-breathe {
-  0%, 100% { opacity: 0.15; transform: scale(0.8); }
-  50% { opacity: 0.55; transform: scale(1.2); }
+  0%, 100% { opacity: 0.1; transform: scale(0.5); }
+  50% { opacity: 0.8; transform: scale(1.5); }
 }
 
-/* System ID Badge */
+/* ── System ID ── TOP-LEFT under bracket */
 #y2k-sysid {
   position: fixed;
-  top: 3.8%;
-  left: 3.5%;
+  top: 2.2%;
+  left: 6%;
   z-index: 1365;
   pointer-events: none;
-  font: 400 8px/1.5 "Lucida Console", "Courier New", monospace;
-  letter-spacing: 0.18em;
-  color: rgba(160, 205, 255, 0.22);
-  text-shadow: 0 0 4px rgba(120, 180, 255, 0.08);
+  font: 400 9px/1.6 "Lucida Console", "Courier New", monospace;
+  letter-spacing: 0.2em;
+  color: rgba(180, 220, 255, 0.35);
+  text-shadow: 1px 0 0 rgba(255, 50, 80, 0.15), -1px 0 0 rgba(50, 200, 255, 0.15), 0 0 6px rgba(120, 180, 255, 0.12);
   mix-blend-mode: screen;
   opacity: 0.6;
   text-transform: uppercase;
+  --y2k-base-opacity: 0.6;
+  animation: y2k-flicker 7s steps(1) infinite;
 }
-#y2k-sysid span {
+#y2k-sysid span { display: block; }
+
+/* ── CRT Noise Overlay ── */
+#y2k-noise {
+  position: fixed;
+  inset: 0;
+  z-index: 1362;
+  pointer-events: none;
+  opacity: 0.04;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 256px 256px;
+  animation: y2k-noise-bar 0.5s steps(3) infinite;
+  transform: translateZ(0);
+  contain: strict;
+}
+
+/* ── CRT Scanlines Grid ── */
+#y2k-crt-lines {
+  position: fixed;
+  inset: 0;
+  z-index: 1361;
+  pointer-events: none;
+  opacity: 0.04;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.35) 2px,
+    rgba(0, 0, 0, 0.35) 4px
+  );
+  mix-blend-mode: multiply;
+  transform: translateZ(0);
+  contain: strict;
+}
+
+/* ── Glitch Bar ── horizontal tear */
+#y2k-glitch-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 1392;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.08);
+  mix-blend-mode: screen;
+  will-change: transform, height, opacity;
+}
+
+/* ══════════ NEW ELEMENTS ══════════ */
+
+/* ── Velocity Meter ── RIGHT side vertical bar */
+#y2k-velocity {
+  position: fixed;
+  right: 2%;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 120px;
+  z-index: 1378;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(80, 140, 200, 0.06);
+  transform: translateZ(0);
+}
+#y2k-velocity-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 0%;
+  border-radius: 3px;
+  transition: height 60ms ease-out;
+  will-change: height;
+}
+#y2k-velocity-label {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font: 400 7px/1 "Lucida Console", monospace;
+  letter-spacing: 0.15em;
+  color: rgba(180, 220, 255, 0.3);
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+/* ── Key Signature Display ── TOP-RIGHT under bracket */
+#y2k-keysig {
+  position: fixed;
+  top: 2.2%;
+  right: 6%;
+  z-index: 1378;
+  pointer-events: none;
+  text-align: right;
+  font: 200 28px/1 "Lucida Console", monospace;
+  letter-spacing: 0.08em;
+  color: rgba(200, 230, 255, 0.45);
+  text-shadow: 2px 0 0 rgba(255, 40, 80, 0.2), -2px 0 0 rgba(40, 200, 255, 0.2), 0 0 20px rgba(120, 190, 255, 0.3);
+  mix-blend-mode: screen;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+#y2k-keysig-sub {
+  font: 400 8px/1.4 "Lucida Console", monospace;
+  letter-spacing: 0.25em;
+  color: rgba(170, 210, 255, 0.3);
+  margin-top: 4px;
+  text-shadow: none;
+}
+
+/* ── Waveform Display ── RIGHT edge, vertical oscilloscope */
+#y2k-waveform {
+  position: fixed;
+  right: 4%;
+  top: 30%;
+  width: 80px;
+  height: 140px;
+  z-index: 1372;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.4;
+  animation: y2k-waveform-drift 4s ease-in-out infinite;
+}
+#y2k-waveform canvas {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  contain: strict;
+}
+
+/* ── Edge Lines ── decorative lines along edges */
+.y2k-edge-line {
+  position: fixed;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  z-index: 1356;
+  animation: y2k-edge-pulse 4s ease-in-out infinite;
+}
+.y2k-edge-left {
+  left: 1.5%;
+  top: 8%;
+  bottom: 8%;
+  width: 1px;
+  background: linear-gradient(180deg, transparent 0%, rgba(160, 220, 255, 0.18) 20%, rgba(160, 220, 255, 0.18) 80%, transparent 100%);
+}
+.y2k-edge-right {
+  right: 1.5%;
+  top: 8%;
+  bottom: 8%;
+  width: 1px;
+  background: linear-gradient(180deg, transparent 0%, rgba(160, 220, 255, 0.18) 20%, rgba(160, 220, 255, 0.18) 80%, transparent 100%);
+}
+.y2k-edge-top {
+  top: 1.5%;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(160, 220, 255, 0.15) 20%, rgba(160, 220, 255, 0.15) 80%, transparent 100%);
+}
+.y2k-edge-bottom {
+  bottom: 4%;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(160, 220, 255, 0.15) 20%, rgba(160, 220, 255, 0.15) 80%, transparent 100%);
+}
+
+/* ── Orbit Ring ── rotating ring with dots, BOTTOM-LEFT */
+#y2k-orbit {
+  position: fixed;
+  bottom: 3%;
+  left: 7%;
+  width: 64px;
+  height: 64px;
+  z-index: 1374;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.3;
+}
+#y2k-orbit svg { width: 100%; height: 100%; overflow: visible; }
+#y2k-orbit-ring {
+  fill: none;
+  stroke: rgba(160, 210, 255, 0.12);
+  stroke-width: 0.8;
+  stroke-dasharray: 3 6;
+}
+.y2k-orbit-dot {
+  fill: rgba(200, 235, 255, 0.6);
+  filter: drop-shadow(0 0 3px rgba(140, 210, 255, 0.4));
+}
+#y2k-orbit-group {
+  transform-origin: 32px 32px;
+  animation: y2k-orbit-spin 12s linear infinite;
+}
+
+/* ── Frequency Label ── BOTTOM-LEFT, between spectrum and orbit */
+#y2k-freq-label {
+  position: fixed;
+  bottom: 10%;
+  left: 2.5%;
+  z-index: 1376;
+  pointer-events: none;
+  font: 200 11px/1.4 "Lucida Console", monospace;
+  letter-spacing: 0.15em;
+  color: rgba(180, 220, 255, 0.3);
+  text-shadow: 0 0 8px rgba(120, 190, 255, 0.15);
+  mix-blend-mode: screen;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+#y2k-freq-hz {
+  font-weight: 600;
+  font-size: 18px;
   display: block;
+  margin-bottom: 2px;
+  color: rgba(220, 240, 255, 0.5);
+  text-shadow: 2px 0 0 rgba(255, 40, 80, 0.15), -2px 0 0 rgba(40, 200, 255, 0.15), 0 0 14px rgba(120, 190, 255, 0.25);
+}
+
+/* ── Note Count / Polyphony ── TOP-RIGHT area */
+#y2k-polycount {
+  position: fixed;
+  top: 7%;
+  right: 2.5%;
+  z-index: 1376;
+  pointer-events: none;
+  text-align: right;
+  font: 200 32px/1 "Lucida Console", monospace;
+  color: rgba(200, 230, 255, 0.25);
+  text-shadow: 0 0 16px rgba(120, 190, 255, 0.15);
+  mix-blend-mode: screen;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+#y2k-polycount-label {
+  font: 400 7px/1.4 "Lucida Console", monospace;
+  letter-spacing: 0.3em;
+  color: rgba(170, 210, 255, 0.25);
+  display: block;
+  margin-top: 2px;
+}
+
+/* ── Horizontal Ticker Bars ── LEFT edge small bars */
+.y2k-ticker-bar {
+  position: fixed;
+  left: 1.5%;
+  width: 12px;
+  height: 2px;
+  z-index: 1368;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  background: rgba(160, 210, 255, 0.2);
+  transition: width 80ms, opacity 80ms;
 }
