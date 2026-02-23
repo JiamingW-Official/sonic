@@ -131,6 +131,9 @@
       state.mixer = { tracks: mixer.getMixerTrackData() };
       state.fx = { fxNames: mixer.getFxNames(), fxPresets: mixer.getFxPresets() };
     }
+    if (api.getKeySignature) {
+      state.keySignature = api.getKeySignature();
+    }
     socket.emit('host:state-sync', state);
   }
 
@@ -190,6 +193,9 @@
       case 'keys:noteOff':
         var rv = _remoteVoices[params.midiNote];
         if (rv && rv.stop) { rv.stop(); delete _remoteVoices[params.midiNote]; }
+        break;
+      case 'keys:setKey':
+        if (api.setKeySignature) api.setKeySignature(params.root, params.scale);
         break;
     }
   }
@@ -505,7 +511,12 @@
     },
     isConnected: function () { return connected; },
     getRoomId: function () { return roomId; },
-    sendStateSync: sendStateSync
+    sendStateSync: sendStateSync,
+    broadcastKeySignature: function (root, scale, name) {
+      if (socket && connected) {
+        socket.emit('host:state-update', { keySignature: { root: root, scale: scale, name: name } });
+      }
+    }
   };
 
 })();

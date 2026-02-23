@@ -1651,6 +1651,9 @@ export function initMidiPlayer(api) {
   let currentNotes = [];
   let currentTranspose = 0;
   let playbackRate = 1;
+  let detectedKeyRoot = 0;
+  let detectedKeyScale = 'major';
+  const KEYSIG_TO_MAJOR_ROOT = { '0': 0, '1': 7, '2': 2, '3': 9, '4': 4, '5': 11, '6': 6, '7': 1, '-1': 5, '-2': 10, '-3': 3, '-4': 8, '-5': 1, '-6': 6, '-7': 11 };
   let rafId = null;
   let liveMidiNotes = [];
   let lastPolyphony = 0;
@@ -2553,6 +2556,11 @@ export function initMidiPlayer(api) {
 
   transposeSelect.addEventListener('change', () => {
     currentTranspose = parseInt(transposeSelect.value, 10) || 0;
+    // Update keyboard key signature to match transposed key
+    if (window.__sonicRemoteAPI && window.__sonicRemoteAPI.setKeySignature) {
+      const effectiveRoot = (detectedKeyRoot + (currentTranspose % 12) + 12) % 12;
+      window.__sonicRemoteAPI.setKeySignature(effectiveRoot, detectedKeyScale);
+    }
     if (isPlaying && currentNotes.length) {
       const seekTime = getCurrentTime();
       clearPlayback();
@@ -2626,6 +2634,24 @@ export function initMidiPlayer(api) {
     } catch (err) {
       infoDiv.textContent = 'Parse error: ' + (err.message || err);
       parsedMidi = null;
+    }
+
+    // Detect key signature from MIDI header
+    detectedKeyRoot = 0;
+    detectedKeyScale = 'major';
+    if (parsedMidi && parsedMidi.header && parsedMidi.header.keySignatures && parsedMidi.header.keySignatures.length > 0) {
+      const ks = parsedMidi.header.keySignatures[0];
+      const majorRoot = KEYSIG_TO_MAJOR_ROOT[String(ks.key)];
+      detectedKeyRoot = majorRoot != null ? majorRoot : 0;
+      detectedKeyScale = ks.scale === 'minor' ? 'minor' : 'major';
+      if (detectedKeyScale === 'minor') {
+        detectedKeyRoot = (detectedKeyRoot - 3 + 12) % 12;
+      }
+    }
+    // Apply key signature (combined with current transpose)
+    if (window.__sonicRemoteAPI && window.__sonicRemoteAPI.setKeySignature) {
+      const effectiveRoot = (detectedKeyRoot + (currentTranspose % 12) + 12) % 12;
+      window.__sonicRemoteAPI.setKeySignature(effectiveRoot, detectedKeyScale);
     }
 
     trackList.innerHTML = '';

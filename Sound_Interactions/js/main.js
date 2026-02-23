@@ -4801,7 +4801,18 @@ import { initMidiPlayer } from './midi-player.js';
     updateHeadBar();
   }
 
-  // Synth: low octave Z–M (C3–B3), mid Q–P (C4–E5), high [ ] (F5, G5)
+  // ── Key Signature System ──
+  const MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11];
+  const MINOR_SCALE = [0, 2, 3, 5, 7, 8, 10];
+  const KEY_ROOT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+  let currentKeyRoot = 0;   // 0=C, 2=D, etc.
+  let currentKeyScale = 'major';
+
+  function getScaleIntervals() {
+    return currentKeyScale === 'minor' ? MINOR_SCALE : MAJOR_SCALE;
+  }
+
+  // Synth: low octave Z–M, mid Q–P, high [ ] — rebuilt dynamically per key signature
   const KEY_TO_NOTE = {
     KeyZ: 48, KeyX: 50, KeyC: 52, KeyV: 53, KeyB: 55, KeyN: 57, KeyM: 59,
     KeyQ: 60, KeyW: 62, KeyE: 64, KeyR: 65, KeyT: 67, KeyY: 69, KeyU: 71, KeyI: 72, KeyO: 74, KeyP: 76,
@@ -4812,6 +4823,30 @@ import { initMidiPlayer } from './midi-player.js';
     KeyQ: 'Q', KeyW: 'W', KeyE: 'E', KeyR: 'R', KeyT: 'T', KeyY: 'Y', KeyU: 'U', KeyI: 'I', KeyO: 'O', KeyP: 'P',
     BracketLeft: '[', BracketRight: ']'
   };
+
+  function rebuildKeyMapping() {
+    const intervals = getScaleIntervals();
+    const root = currentKeyRoot;
+    const zKeys = ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM'];
+    const base3 = 48 + root;
+    for (let i = 0; i < zKeys.length; i++) KEY_TO_NOTE[zKeys[i]] = base3 + intervals[i];
+    const qKeys = ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP'];
+    const base4 = 60 + root;
+    for (let i = 0; i < qKeys.length; i++) KEY_TO_NOTE[qKeys[i]] = base4 + Math.floor(i / 7) * 12 + intervals[i % 7];
+    KEY_TO_NOTE.BracketLeft = base4 + 12 + intervals[3]; // degree 4 of next octave
+    KEY_TO_NOTE.BracketRight = base4 + 12 + intervals[4]; // degree 5 of next octave
+  }
+
+  function setKeySignature(root, scale) {
+    currentKeyRoot = ((root % 12) + 12) % 12;
+    currentKeyScale = scale === 'minor' ? 'minor' : 'major';
+    rebuildKeyMapping();
+    const label = KEY_ROOT_NAMES[currentKeyRoot] + ' ' + (currentKeyScale === 'minor' ? 'min' : 'Maj');
+    showModeToast('Key: ' + label);
+    if (window.__sonicRemoteBridge && window.__sonicRemoteBridge.broadcastKeySignature) {
+      window.__sonicRemoteBridge.broadcastKeySignature(currentKeyRoot, currentKeyScale, label);
+    }
+  }
   // Drums: middle row A–L + ; ' \ (12 pads, 2020s kit)
   const DRUM_KEYS = {
     KeyA: 'kick', KeyS: 'snare', KeyD: '808', KeyF: 'clap', KeyG: 'hatClosed', KeyH: 'hatOpen',
@@ -10865,6 +10900,16 @@ import { initMidiPlayer } from './midi-player.js';
       var mainChain = trackEffectChains.get('main');
       trackEffectChains.clear();
       if (mainChain) trackEffectChains.set('main', mainChain);
+    },
+    // Key signature
+    setKeySignature: function (root, scale) { setKeySignature(root, scale); },
+    getKeySignature: function () {
+      return {
+        root: currentKeyRoot,
+        scale: currentKeyScale,
+        name: KEY_ROOT_NAMES[currentKeyRoot] + ' ' + (currentKeyScale === 'minor' ? 'min' : 'Maj'),
+        scaleNotes: getScaleIntervals().map(function (i) { return (currentKeyRoot + i) % 12; })
+      };
     }
   };
 })();

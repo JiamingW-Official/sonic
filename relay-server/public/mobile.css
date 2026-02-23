@@ -684,125 +684,105 @@ html, body {
 }
 
 /* ══════════════════════════════
-   Piano Keyboard
+   Keyboard Grid (diatonic pads)
    ══════════════════════════════ */
 
-.keys-octave-row {
-  position: relative;
-  display: flex;
-  align-items: stretch;
-  margin-bottom: 4px;
-}
-
-.keys-oct-label {
-  writing-mode: vertical-lr;
-  text-orientation: mixed;
-  font: bold 9px Tahoma, sans-serif;
-  color: #404040;
-  background: #d4d0c8;
-  border: 1px solid #808080;
-  box-shadow: inset 1px 1px 0 #fff;
-  padding: 4px 2px;
+.keys-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 18px;
+  justify-content: space-between;
+  padding: 4px 2px 6px;
   flex-shrink: 0;
 }
 
-.keys-row {
+.keys-key-selector {
   display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.keys-nav-btn {
+  min-width: 28px !important;
+  min-height: 24px !important;
+  padding: 2px 4px !important;
+  font-size: 10px !important;
+}
+
+.keys-key-label {
+  font: bold 13px Tahoma, sans-serif;
+  color: #000080;
+  min-width: 56px;
+  text-align: center;
+  background: #fff;
+  border: 2px inset #808080;
+  padding: 2px 6px;
+}
+
+.keys-scale-btn {
+  min-width: 36px !important;
+  min-height: 24px !important;
+  padding: 2px 4px !important;
+  font: bold 10px Tahoma, sans-serif !important;
+}
+
+.keys-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  padding: 2px;
   flex: 1;
-  gap: 2px;
+  max-width: 420px;
+  margin: 0 auto;
+  width: 100%;
 }
 
-.keys-black-row {
-  position: absolute;
-  top: 0;
-  left: 18px;
-  right: 0;
-  height: 55%;
-  pointer-events: none;
-  z-index: 2;
-}
-
-.piano-key {
+.keys-pad {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  min-height: 60px;
+  border: 2px outset #4a6090;
+  box-shadow:
+    inset -1px -1px 0 rgba(0,0,0,0.3),
+    inset 1px 1px 0 rgba(255,255,255,0.15);
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
   touch-action: none;
-  transition: transform 0.04s;
+  transition: transform 0.05s;
+  border-radius: 2px;
 }
 
-.piano-key.white {
-  flex: 1;
-  min-height: 64px;
-  background: linear-gradient(180deg, #f8f8f8 0%, #fff 20%, #e8e8e8 100%);
-  border: 2px outset #ddd;
-  box-shadow:
-    inset -1px -1px 0 #a0a0a0,
-    inset 1px 1px 0 #fff,
-    1px 1px 2px rgba(0,0,0,0.1);
-  padding-bottom: 4px;
-}
-
-.piano-key.white:active,
-.piano-key.white.active {
-  background: linear-gradient(180deg, #d0d0ff 0%, #a0a0e0 100%);
+.keys-pad:active,
+.keys-pad.active {
   border-style: inset;
   box-shadow:
-    inset 1px 1px 0 #606060,
-    inset -1px -1px 0 #c0c0c0;
-  transform: scale(0.97);
+    inset 1px 1px 0 rgba(0,0,0,0.4),
+    inset -1px -1px 0 rgba(255,255,255,0.1);
+  transform: scale(0.95);
+  background: #000080 !important;
+  filter: brightness(1.6);
 }
 
-.piano-key.black {
-  position: absolute;
-  width: calc(100% / 7 * 0.65);
-  height: 100%;
-  background: linear-gradient(180deg, #404040 0%, #1a1a1a 60%, #000 100%);
-  border: 2px outset #555;
-  box-shadow:
-    inset -1px -1px 0 #000,
-    inset 1px 1px 0 #606060,
-    2px 2px 4px rgba(0,0,0,0.3);
-  pointer-events: auto;
-  z-index: 3;
-  padding-bottom: 3px;
-}
-
-.piano-key.black:active,
-.piano-key.black.active {
-  background: linear-gradient(180deg, #000080 0%, #0000c0 100%);
-  border-style: inset;
-  box-shadow:
-    inset 1px 1px 0 #000040,
-    inset -1px -1px 0 #4040a0;
-  transform: scaleY(0.96);
-}
-
-.piano-key-name {
-  font: bold 9px Tahoma, sans-serif;
-  text-align: center;
+.keys-pad-name {
+  font: bold 14px Tahoma, sans-serif;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
   pointer-events: none;
 }
 
-.piano-key.white .piano-key-name {
-  color: #606060;
-}
-
-.piano-key.white.active .piano-key-name {
-  color: #000080;
-}
-
-.piano-key.black .piano-key-name {
-  color: #a0a0a0;
-  font-size: 8px;
-}
-
-.piano-key.black.active .piano-key-name {
+.keys-pad.active .keys-pad-name {
   color: #fff;
+}
+
+.keys-pad-oct {
+  font: 10px Tahoma, sans-serif;
+  color: rgba(255,255,255,0.5);
+  margin-top: 1px;
+  pointer-events: none;
+}
+
+.keys-pad.active .keys-pad-oct {
+  color: rgba(255,255,255,0.7);
 }
