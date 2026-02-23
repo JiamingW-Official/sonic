@@ -22,8 +22,13 @@ const io = new Server(server, {
   pingTimeout: 8000
 });
 
-// Serve mobile client pages
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve mobile client pages (no-cache to ensure latest version)
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: false,
+  setHeaders: (res) => {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  }
+}));
 
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
