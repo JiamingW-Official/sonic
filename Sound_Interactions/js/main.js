@@ -4891,7 +4891,8 @@ import { initMidiPlayer } from './midi-player.js';
   let outputBusGain = null;
   let drumGain = null;
   let drumDryBus = null;
-  let leadDriveCurve = null;
+  let currentSynthIdx = 0;
+  const driveCurveCache = new Map();
   let activeLeadVoices = 0;
   let activeDrumVoices = 0;
   let chordCount = 0; // how many notes active simultaneously
@@ -5178,6 +5179,223 @@ import { initMidiPlayer } from './midi-player.js';
     mainFxDownstream.forEach(n => { try { mainFxOutput.connect(n); } catch (e) { /* ok */ } });
   }
 
+  // ── Drive curve generator (per-preset, cached) ──
+  function generateDriveCurve(type, amount, postGain, size) {
+    var key = type + '|' + amount + '|' + postGain + '|' + (size || 512);
+    if (driveCurveCache.has(key)) return driveCurveCache.get(key);
+    var n = size || 512;
+    var curve = new Float32Array(n);
+    for (var i = 0; i < n; i++) {
+      var x = (i / (n - 1)) * 2 - 1;
+      switch (type) {
+        case 'tanh':     curve[i] = Math.tanh(x * amount) * postGain; break;
+        case 'foldback': curve[i] = Math.sin(x * amount) * postGain; break;
+        case 'softclip':
+          var t = x * amount;
+          curve[i] = (t > 1 ? 1 : t < -1 ? -1 : t - (t * t * t) / 3) * postGain;
+          break;
+        default:         curve[i] = Math.tanh(x * amount) * postGain; break;
+      }
+    }
+    driveCurveCache.set(key, curve);
+    return curve;
+  }
+
+  // ── Synth Presets ──
+  var SYNTH_PRESETS = [
+    // ──────────────────────────────────────────────────────────────
+    // 0 — Crystalline Lead
+    //     Reference: Sylenth1 "Init Lead" / Serum clean lead
+    //     Saw + slightly detuned saw for unison chorus, moderate
+    //     filter with velocity sensitivity, light tanh saturation.
+    //     Cuts through a mix at any polyphony level.
+    // ──────────────────────────────────────────────────────────────
+    {
+      name: 'Crystalline Lead', key: 'crystalline',
+      oscA: { type: 'sawtooth', detuneCenter: -3, gain: 0.58 },
+      oscB: { type: 'sawtooth', detuneCenter: 3.2, gain: 0.32, freqRatio: 1.0 },
+      air:  { type: 'sine', freqRatio: 2.0, gainBase: 0.04, gainPitch: 0.025 },
+      sub:  { type: 'sine', freqRatio: 0.5, gainBase: 0.06, gainPitch: -0.025, gainMin: 0.015, maxMidi: 76 },
+      lowpass:  { baseFreq: 2200, velScale: 4200, freqScale: 0.38, sustainFreq: 1600, sustainVel: 2600, sustainFreqScale: 0.18, Q: 0.68, Qvel: 0.16 },
+      highpass: { baseFreq: 20, freqScale: 0.045, maxFreq: 80, Q: 0.6 },
+      presence: { baseFreq: 2500, pitchScale: 900, Q: 0.9, gainBase: 0.7, gainBright: 0.5 },
+      tame:     { freq: 4500, Q: 1.1, gain: -0.9 },
+      drive: { type: 'tanh', amount: 1.15, postGain: 0.99, oversample: '2x' },
+      env: { atkShort: 0.003, atkSust: 0.006, atkSched: 0.005,
+             decShort: 0.1,   decSust: 0.18,  decSched: 0.14,
+             susShort: 0.28,  susSust: 0.58,  susSched: 0.44,
+             relShort: 0.24,  relSust: 0.38,  relSched: 0.3 },
+      gain: { peakLive: 0.27, peakMidi: 0.24, minLive: 0.035, maxLive: 0.18, minMidi: 0.028, maxMidi: 0.15 },
+      panRange: 0.14, panCenter: 66, panDiv: 40,
+      ui: { gradient: ['#000080', '#1084d0'], accent: '#1084d0', icon: '\u2726' }
+    },
+    // ──────────────────────────────────────────────────────────────
+    // 1 — Glass Bell
+    //     Reference: Yamaha DX7 "E.PIANO 1" / FM bell tones
+    //     Sine carrier with inharmonic ratio 3.5 modulator for
+    //     metallic bell partials. High shimmer partial at 5.04×.
+    //     Minimal drive to preserve crystalline purity. Fast decay
+    //     with delicate release tail.
+    // ──────────────────────────────────────────────────────────────
+    {
+      name: 'Glass Bell', key: 'bell',
+      oscA: { type: 'sine', detuneCenter: 0, gain: 0.52 },
+      oscB: { type: 'sine', detuneCenter: 0.8, gain: 0.28, freqRatio: 3.5 },
+      air:  { type: 'sine', freqRatio: 5.04, gainBase: 0.12, gainPitch: 0.035 },
+      sub:  null,
+      lowpass:  { baseFreq: 4800, velScale: 4800, freqScale: 0.55, sustainFreq: 2200, sustainVel: 2000, sustainFreqScale: 0.25, Q: 0.52, Qvel: 0.1 },
+      highpass: { baseFreq: 35, freqScale: 0.055, maxFreq: 110, Q: 0.5 },
+      presence: { baseFreq: 3400, pitchScale: 1100, Q: 0.95, gainBase: 1.1, gainBright: 0.65 },
+      tame:     { freq: 6000, Q: 0.85, gain: -0.6 },
+      drive: { type: 'tanh', amount: 0.4, postGain: 0.995, oversample: '2x' },
+      env: { atkShort: 0.001, atkSust: 0.002, atkSched: 0.001,
+             decShort: 0.12,  decSust: 0.3,   decSched: 0.2,
+             susShort: 0.05,  susSust: 0.12,  susSched: 0.08,
+             relShort: 0.35,  relSust: 0.55,  relSched: 0.45 },
+      gain: { peakLive: 0.29, peakMidi: 0.26, minLive: 0.038, maxLive: 0.2, minMidi: 0.03, maxMidi: 0.17 },
+      panRange: 0.16, panCenter: 66, panDiv: 38,
+      ui: { gradient: ['#006068', '#20a0b0'], accent: '#20a0b0', icon: '\u25B3' }
+    },
+    // ──────────────────────────────────────────────────────────────
+    // 3 — Hypersaw
+    //     Reference: JP-8000 Supersaw / Sylenth1 "Supersaw Init"
+    //     Balanced detuned saw pair + extra detuned air layer for
+    //     wide unison. Sine sub for foundation. Moderate tanh keeps
+    //     warmth without crushing dynamics. Wide stereo pan.
+    // ──────────────────────────────────────────────────────────────
+    {
+      name: 'Hypersaw', key: 'hypersaw',
+      oscA: { type: 'sawtooth', detuneCenter: -9, gain: 0.50 },
+      oscB: { type: 'sawtooth', detuneCenter: 9, gain: 0.50, freqRatio: 1.0 },
+      air:  { type: 'sawtooth', freqRatio: 1.005, gainBase: 0.15, gainPitch: 0.025 },
+      sub:  { type: 'sine', freqRatio: 0.5, gainBase: 0.08, gainPitch: -0.022, gainMin: 0.02, maxMidi: 78 },
+      lowpass:  { baseFreq: 2800, velScale: 4800, freqScale: 0.45, sustainFreq: 2000, sustainVel: 2800, sustainFreqScale: 0.22, Q: 0.78, Qvel: 0.18 },
+      highpass: { baseFreq: 22, freqScale: 0.048, maxFreq: 85, Q: 0.55 },
+      presence: { baseFreq: 2200, pitchScale: 750, Q: 0.85, gainBase: 0.65, gainBright: 0.5 },
+      tame:     { freq: 4800, Q: 1.05, gain: -0.7 },
+      drive: { type: 'tanh', amount: 1.4, postGain: 0.97, oversample: '4x' },
+      env: { atkShort: 0.003, atkSust: 0.005, atkSched: 0.004,
+             decShort: 0.1,   decSust: 0.18,  decSched: 0.14,
+             susShort: 0.35,  susSust: 0.6,   susSched: 0.48,
+             relShort: 0.28,  relSust: 0.42,  relSched: 0.34 },
+      gain: { peakLive: 0.22, peakMidi: 0.20, minLive: 0.03, maxLive: 0.15, minMidi: 0.024, maxMidi: 0.12 },
+      panRange: 0.28, panCenter: 66, panDiv: 32,
+      ui: { gradient: ['#800020', '#d04040'], accent: '#d04040', icon: '\u26A1' }
+    },
+    // ──────────────────────────────────────────────────────────────
+    // 4 — Pluck
+    //     Reference: Serum "Pluck" / Massive "Pluck Synth"
+    //     Sawtooth for rich harmonics with triangle softening layer.
+    //     Dramatic filter sweep (5200 → 900 Hz) creates the pluck
+    //     character. High resonance accents the transient. Short
+    //     decay, near-zero sustain. Harmonic ping from air partial.
+    // ──────────────────────────────────────────────────────────────
+    {
+      name: 'Pluck', key: 'pluck',
+      oscA: { type: 'sawtooth', detuneCenter: -0.8, gain: 0.55 },
+      oscB: { type: 'triangle', detuneCenter: 0.4, gain: 0.28, freqRatio: 1.0 },
+      air:  { type: 'sine', freqRatio: 4.0, gainBase: 0.07, gainPitch: 0.02 },
+      sub:  null,
+      lowpass:  { baseFreq: 5200, velScale: 3800, freqScale: 0.48, sustainFreq: 900, sustainVel: 1000, sustainFreqScale: 0.12, Q: 0.95, Qvel: 0.28 },
+      highpass: { baseFreq: 45, freqScale: 0.07, maxFreq: 150, Q: 0.65 },
+      presence: { baseFreq: 3000, pitchScale: 1000, Q: 1.2, gainBase: 1.0, gainBright: 0.6 },
+      tame:     { freq: 5200, Q: 1.0, gain: -0.5 },
+      drive: { type: 'tanh', amount: 0.8, postGain: 0.99, oversample: '2x' },
+      env: { atkShort: 0.001, atkSust: 0.001, atkSched: 0.001,
+             decShort: 0.05,  decSust: 0.14,  decSched: 0.08,
+             susShort: 0.03,  susSust: 0.06,  susSched: 0.04,
+             relShort: 0.15,  relSust: 0.28,  relSched: 0.2 },
+      gain: { peakLive: 0.31, peakMidi: 0.27, minLive: 0.038, maxLive: 0.21, minMidi: 0.032, maxMidi: 0.17 },
+      panRange: 0.10, panCenter: 66, panDiv: 44,
+      ui: { gradient: ['#206020', '#40a040'], accent: '#40a040', icon: '\u22BF' }
+    },
+    // ──────────────────────────────────────────────────────────────
+    // 5 — Cathedral Organ
+    //     Reference: Hammond B3 drawbar registration / pipe organ
+    //     Sine fundamental (8') + octave partial (4') + quint air
+    //     partial (2⅔') mimics drawbar harmonics. Sub-octave (16')
+    //     adds depth. Open filter, minimal velocity sensitivity
+    //     (organs respond uniformly). Soft-clip emulates tube amp.
+    //     High sustain with gentle wind-pipe attack.
+    // ──────────────────────────────────────────────────────────────
+    {
+      name: 'Cathedral Organ', key: 'organ',
+      oscA: { type: 'sine', detuneCenter: 0, gain: 0.44 },
+      oscB: { type: 'sine', detuneCenter: 0, gain: 0.26, freqRatio: 2.0 },
+      air:  { type: 'sine', freqRatio: 3.0, gainBase: 0.16, gainPitch: 0.02 },
+      sub:  { type: 'sine', freqRatio: 0.5, gainBase: 0.09, gainPitch: -0.022, gainMin: 0.02, maxMidi: 80 },
+      lowpass:  { baseFreq: 3400, velScale: 1800, freqScale: 0.28, sustainFreq: 3000, sustainVel: 1400, sustainFreqScale: 0.22, Q: 0.45, Qvel: 0.06 },
+      highpass: { baseFreq: 18, freqScale: 0.035, maxFreq: 55, Q: 0.45 },
+      presence: { baseFreq: 2000, pitchScale: 500, Q: 0.65, gainBase: 0.35, gainBright: 0.25 },
+      tame:     { freq: 3800, Q: 1.0, gain: -0.7 },
+      drive: { type: 'softclip', amount: 0.6, postGain: 0.99, oversample: '2x' },
+      env: { atkShort: 0.015, atkSust: 0.035, atkSched: 0.025,
+             decShort: 0.12,  decSust: 0.2,   decSched: 0.16,
+             susShort: 0.65,  susSust: 0.88,  susSched: 0.78,
+             relShort: 0.3,   relSust: 0.45,  relSched: 0.36 },
+      gain: { peakLive: 0.25, peakMidi: 0.23, minLive: 0.035, maxLive: 0.17, minMidi: 0.028, maxMidi: 0.14 },
+      panRange: 0.08, panCenter: 66, panDiv: 48,
+      ui: { gradient: ['#604000', '#b08030'], accent: '#b08030', icon: '\u2671' }
+    },
+    // ──────────────────────────────────────────────────────────────
+    // 6 — Abyss Bass
+    //     Reference: NI Massive "Reese Bass" / 808 sub bass
+    //     Paired detuned saws for classic Reese phasing movement.
+    //     Strong sine sub-oscillator for clean low-end foundation.
+    //     Tight lowpass (650 Hz) keeps energy below the mud zone.
+    //     Tanh saturation adds analog warmth without fizz. Very
+    //     narrow pan — bass must stay centered.
+    // ──────────────────────────────────────────────────────────────
+    {
+      name: 'Abyss Bass', key: 'abyss',
+      oscA: { type: 'sawtooth', detuneCenter: -2, gain: 0.48 },
+      oscB: { type: 'sawtooth', detuneCenter: 2, gain: 0.38, freqRatio: 1.0 },
+      air:  null,
+      sub:  { type: 'sine', freqRatio: 0.5, gainBase: 0.15, gainPitch: -0.04, gainMin: 0.04, maxMidi: 70 },
+      lowpass:  { baseFreq: 650, velScale: 1800, freqScale: 0.2, sustainFreq: 500, sustainVel: 1000, sustainFreqScale: 0.1, Q: 0.75, Qvel: 0.18 },
+      highpass: { baseFreq: 16, freqScale: 0.02, maxFreq: 40, Q: 0.5 },
+      presence: { baseFreq: 900, pitchScale: 300, Q: 0.65, gainBase: 0.45, gainBright: 0.25 },
+      tame:     { freq: 2500, Q: 1.4, gain: -1.8 },
+      drive: { type: 'tanh', amount: 1.8, postGain: 0.94, oversample: '4x' },
+      env: { atkShort: 0.004, atkSust: 0.008, atkSched: 0.006,
+             decShort: 0.12,  decSust: 0.2,   decSched: 0.15,
+             susShort: 0.38,  susSust: 0.62,  susSched: 0.5,
+             relShort: 0.25,  relSust: 0.4,   relSched: 0.32 },
+      gain: { peakLive: 0.28, peakMidi: 0.25, minLive: 0.038, maxLive: 0.19, minMidi: 0.032, maxMidi: 0.16 },
+      panRange: 0.04, panCenter: 66, panDiv: 52,
+      ui: { gradient: ['#200040', '#4020a0'], accent: '#4020a0', icon: '\u25BC' }
+    },
+    // ──────────────────────────────────────────────────────────────
+    // 7 — Chip Crunch
+    //     Reference: NES 2A03 / Game Boy pulse channels
+    //     Clean square wave + octave square for authentic chip
+    //     doubling. No air, no sub — 8-bit hardware had none.
+    //     Open filter (chips are bright/unfiltered). Tanh drive
+    //     emulates DAC aliasing character without destroying the
+    //     square wave shape (foldback→sin ruins it). Snappy
+    //     envelope for precise chip-style articulation.
+    // ──────────────────────────────────────────────────────────────
+    {
+      name: 'Chip Crunch', key: 'chip',
+      oscA: { type: 'square', detuneCenter: 0, gain: 0.52 },
+      oscB: { type: 'square', detuneCenter: 0, gain: 0.22, freqRatio: 2.0 },
+      air:  null,
+      sub:  null,
+      lowpass:  { baseFreq: 5500, velScale: 1200, freqScale: 0.12, sustainFreq: 5200, sustainVel: 1000, sustainFreqScale: 0.08, Q: 0.55, Qvel: 0.08 },
+      highpass: { baseFreq: 55, freqScale: 0.055, maxFreq: 180, Q: 0.55 },
+      presence: { baseFreq: 2800, pitchScale: 500, Q: 0.9, gainBase: 0.7, gainBright: 0.35 },
+      tame:     { freq: 5500, Q: 0.75, gain: -0.3 },
+      drive: { type: 'tanh', amount: 1.5, postGain: 0.92, oversample: '2x' },
+      env: { atkShort: 0.001, atkSust: 0.002, atkSched: 0.001,
+             decShort: 0.06,  decSust: 0.12,  decSched: 0.08,
+             susShort: 0.18,  susSust: 0.4,   susSched: 0.3,
+             relShort: 0.1,   relSust: 0.18,  relSched: 0.14 },
+      gain: { peakLive: 0.26, peakMidi: 0.23, minLive: 0.034, maxLive: 0.18, minMidi: 0.028, maxMidi: 0.15 },
+      panRange: 0.06, panCenter: 66, panDiv: 46,
+      ui: { gradient: ['#404000', '#90a020'], accent: '#90a020', icon: '\u25A0' }
+    }
+  ];
+
   function initAudio() {
     if (audioCtx) return;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -5223,11 +5441,6 @@ import { initMidiPlayer } from './midi-player.js';
     }
     color.curve = curve;
     color.oversample = '4x';
-    leadDriveCurve = new Float32Array(512);
-    for (let i = 0; i < leadDriveCurve.length; i++) {
-      const x = (i / (leadDriveCurve.length - 1)) * 2 - 1;
-      leadDriveCurve[i] = Math.tanh(x * 1.5) * 0.98;
-    }
 
     const tonePresence = audioCtx.createBiquadFilter();
     tonePresence.type = 'peaking';
@@ -5767,50 +5980,51 @@ import { initMidiPlayer } from './midi-player.js';
     const polyTrim = fromMIDI
       ? (1 / Math.pow(polyForGain, 0.34))
       : (1 / Math.pow(effectivePoly, 0.58));
-    let peakGain = (fromMIDI ? 0.245 : 0.27) * velStable * polyTrim;
+    const P = SYNTH_PRESETS[currentSynthIdx];
+    let peakGain = (fromMIDI ? P.gain.peakMidi : P.gain.peakLive) * velStable * polyTrim;
     if (harmonyEnabled) peakGain *= 0.92;
     peakGain = fromMIDI
-      ? Math.max(0.03, Math.min(0.16, peakGain))
-      : Math.max(0.038, Math.min(0.19, peakGain));
+      ? Math.max(P.gain.minMidi, Math.min(P.gain.maxMidi, peakGain))
+      : Math.max(P.gain.minLive, Math.min(P.gain.maxLive, peakGain));
     const heavyMidi = fromMIDI && effectivePoly >= 10;
     const ultraMidi = fromMIDI && effectivePoly >= 14;
-    const useOscB = !heavyMidi;
-    const useAir = !ultraMidi;
-    const useSub = midi < 74 && (!fromMIDI || effectivePoly <= 11);
+    const useOscB = P.oscB && !heavyMidi;
+    const useAir = P.air && !ultraMidi;
+    const useSub = P.sub && midi < (P.sub.maxMidi || 74) && (!fromMIDI || effectivePoly <= 11);
 
     const oscA = audioCtx.createOscillator();
-    oscA.type = 'sawtooth';
+    oscA.type = P.oscA.type;
     oscA.frequency.value = freq;
-    oscA.detune.value = -2.8;
+    oscA.detune.value = P.oscA.detuneCenter;
     const oscAGain = audioCtx.createGain();
-    oscAGain.gain.value = 0.62;
+    oscAGain.gain.value = P.oscA.gain;
     oscA.connect(oscAGain);
 
     const oscB = useOscB ? audioCtx.createOscillator() : null;
     const oscBGain = useOscB ? audioCtx.createGain() : null;
     if (oscB && oscBGain) {
-      oscB.type = 'square';
-      oscB.frequency.value = freq;
-      oscB.detune.value = 4.5;
-      oscBGain.gain.value = 0.22;
+      oscB.type = P.oscB.type;
+      oscB.frequency.value = freq * (P.oscB.freqRatio || 1.0);
+      oscB.detune.value = P.oscB.detuneCenter;
+      oscBGain.gain.value = P.oscB.gain;
       oscB.connect(oscBGain);
     }
 
     const airOsc = useAir ? audioCtx.createOscillator() : null;
     const airGain = useAir ? audioCtx.createGain() : null;
     if (airOsc && airGain) {
-      airOsc.type = 'sine';
-      airOsc.frequency.value = freq * 2;
-      airGain.gain.value = 0.045 + pitchNorm * 0.028;
+      airOsc.type = P.air.type;
+      airOsc.frequency.value = freq * P.air.freqRatio;
+      airGain.gain.value = P.air.gainBase + pitchNorm * P.air.gainPitch;
       airOsc.connect(airGain);
     }
 
     const subOsc = useSub ? audioCtx.createOscillator() : null;
     const subGain = subOsc ? audioCtx.createGain() : null;
     if (subOsc && subGain) {
-      subOsc.type = 'sine';
-      subOsc.frequency.value = freq * 0.5;
-      subGain.gain.value = Math.max(0.016, 0.07 - pitchNorm * 0.028);
+      subOsc.type = P.sub.type;
+      subOsc.frequency.value = freq * P.sub.freqRatio;
+      subGain.gain.value = Math.max(P.sub.gainMin, P.sub.gainBase + pitchNorm * P.sub.gainPitch);
       subOsc.connect(subGain);
     }
 
@@ -5836,39 +6050,32 @@ import { initMidiPlayer } from './midi-player.js';
     const voiceLowpass = audioCtx.createBiquadFilter();
     voiceLowpass.type = 'lowpass';
     const brightness = clamp01(0.44 + velNorm * 0.31 + (1 - pitchNorm) * 0.16 - Math.min(0.14, (effectivePoly - 1) * 0.012));
-    const lpStart = Math.min(9800, Math.max(1700, 1900 + brightness * 4600 + freq * 0.42));
-    const lpSustain = Math.min(7200, Math.max(1300, 1400 + brightness * 2900 + freq * 0.2));
+    const lpStart = Math.min(9800, Math.max(1700, P.lowpass.baseFreq + brightness * P.lowpass.velScale + freq * P.lowpass.freqScale));
+    const lpSustain = Math.min(7200, Math.max(1300, P.lowpass.sustainFreq + brightness * P.lowpass.sustainVel + freq * P.lowpass.sustainFreqScale));
     voiceLowpass.frequency.setValueAtTime(lpStart, now);
     voiceLowpass.frequency.exponentialRampToValueAtTime(lpSustain, now + 0.1);
-    voiceLowpass.Q.value = 0.72 + brightness * 0.18;
+    voiceLowpass.Q.value = P.lowpass.Q + brightness * P.lowpass.Qvel;
 
     const voiceHighpass = audioCtx.createBiquadFilter();
     voiceHighpass.type = 'highpass';
-    voiceHighpass.frequency.value = Math.max(22, Math.min(80, 18 + freq * 0.048));
-    voiceHighpass.Q.value = 0.64;
+    voiceHighpass.frequency.value = Math.max(22, Math.min(P.highpass.maxFreq, P.highpass.baseFreq + freq * P.highpass.freqScale));
+    voiceHighpass.Q.value = P.highpass.Q;
 
     const voicePresence = audioCtx.createBiquadFilter();
     voicePresence.type = 'peaking';
-    voicePresence.frequency.value = 2100 + pitchNorm * 900;
-    voicePresence.Q.value = 0.82;
-    voicePresence.gain.value = 0.62 + brightness * 0.55;
+    voicePresence.frequency.value = P.presence.baseFreq + pitchNorm * P.presence.pitchScale;
+    voicePresence.Q.value = P.presence.Q;
+    voicePresence.gain.value = P.presence.gainBase + brightness * P.presence.gainBright;
 
     const voiceTame = audioCtx.createBiquadFilter();
     voiceTame.type = 'peaking';
-    voiceTame.frequency.value = 4100;
-    voiceTame.Q.value = 1.1;
-    voiceTame.gain.value = -0.8;
+    voiceTame.frequency.value = P.tame.freq;
+    voiceTame.Q.value = P.tame.Q;
+    voiceTame.gain.value = P.tame.gain;
 
     const voiceDrive = audioCtx.createWaveShaper();
-    if (!leadDriveCurve) {
-      leadDriveCurve = new Float32Array(512);
-      for (let i = 0; i < leadDriveCurve.length; i++) {
-        const x = (i / (leadDriveCurve.length - 1)) * 2 - 1;
-        leadDriveCurve[i] = Math.tanh(x * 1.25) * 0.985;
-      }
-    }
-    voiceDrive.curve = leadDriveCurve;
-    voiceDrive.oversample = '2x';
+    voiceDrive.curve = generateDriveCurve(P.drive.type, P.drive.amount, P.drive.postGain);
+    voiceDrive.oversample = P.drive.oversample;
 
     const envGain = audioCtx.createGain();
     envGain.gain.value = 0;
@@ -5883,7 +6090,7 @@ import { initMidiPlayer } from './midi-player.js';
     let voiceOut = envGain;
     if (typeof audioCtx.createStereoPanner === 'function') {
       const voicePan = audioCtx.createStereoPanner();
-      voicePan.pan.value = Math.max(-0.12, Math.min(0.12, (midi - 66) / 42));
+      voicePan.pan.value = Math.max(-P.panRange, Math.min(P.panRange, (midi - P.panCenter) / P.panDiv));
       envGain.connect(voicePan);
       voiceOut = voicePan;
     }
@@ -5891,10 +6098,10 @@ import { initMidiPlayer } from './midi-player.js';
     const trackMix = (opts.trackIndex != null) ? getTrackMixerNode(opts.trackIndex) : null;
     voiceOut.connect(trackMix ? trackMix.gain : masterGain);
 
-    const attack = shortOnly ? 0.004 : (sustained ? 0.008 : 0.0055);
-    const decay = shortOnly ? 0.1 : (sustained ? 0.19 : 0.14);
-    const sustainAmt = shortOnly ? 0.24 : (sustained ? 0.56 : 0.4);
-    const release = shortOnly ? 0.26 : (sustained ? 0.4 : 0.32);
+    const attack = shortOnly ? P.env.atkShort : (sustained ? P.env.atkSust : P.env.atkSched);
+    const decay = shortOnly ? P.env.decShort : (sustained ? P.env.decSust : P.env.decSched);
+    const sustainAmt = shortOnly ? P.env.susShort : (sustained ? P.env.susSust : P.env.susSched);
+    const release = shortOnly ? P.env.relShort : (sustained ? P.env.relSust : P.env.relSched);
     const releaseEnd = now + attack + decay + release;
     envGain.gain.setValueAtTime(0, now);
     envGain.gain.linearRampToValueAtTime(peakGain, now + attack);
@@ -6162,6 +6369,24 @@ import { initMidiPlayer } from './midi-player.js';
     }
   });
 
+  // ═══ Synth Editor (single window) ═══
+  let synthRackEl = null;
+  let synthRackMinimized = false;
+  let synthRackDragging = false;
+  let synthRackDragX = 0, synthRackDragY = 0;
+  let synthEditorEl = null;
+  let synthEditorMinimized = false;
+  let synthEditorDragging = false;
+  let synthEditorDragX = 0, synthEditorDragY = 0;
+  let synthEditorIdx = -1;
+  let _activeKnobDrag = null;
+  let _topZIndex = 1500;
+  let _synthOscCanvas = null;
+  let _synthOscAccent = '';
+  let _synthOscRunning = false;
+  let _synthOriginals = null;
+  var _synthCurrentVar = [0, 0, 0, 0, 0, 0, 0];
+
   // ═══ Win95 MIDI Folder Window ═══
   const MIDI_DB = 'sonic-midi-library';
   const MIDI_STORE = 'files';
@@ -6268,9 +6493,7 @@ import { initMidiPlayer } from './midi-player.js';
     closeDropdown();
     var dd = document.createElement('div');
     dd.className = 'w95-dropdown';
-    var rect = anchor.getBoundingClientRect();
-    dd.style.left = rect.left + 'px';
-    dd.style.top = rect.bottom + 'px';
+    dd.style.visibility = 'hidden';
     items.forEach(function (it) {
       if (it === '---') {
         var hr = document.createElement('div');
@@ -6299,6 +6522,19 @@ import { initMidiPlayer } from './midi-player.js';
       dd.appendChild(row);
     });
     document.body.appendChild(dd);
+    // Position with viewport clamping
+    var anchorRect = anchor.getBoundingClientRect();
+    var ddW = dd.offsetWidth;
+    var ddH = dd.offsetHeight;
+    var left = anchorRect.left;
+    var top = anchorRect.bottom;
+    if (left + ddW > window.innerWidth) left = window.innerWidth - ddW - 2;
+    if (left < 0) left = 0;
+    if (top + ddH > window.innerHeight) top = anchorRect.top - ddH;
+    if (top < 0) top = 0;
+    dd.style.left = left + 'px';
+    dd.style.top = top + 'px';
+    dd.style.visibility = 'visible';
     activeDropdown = dd;
   }
 
@@ -6345,15 +6581,25 @@ import { initMidiPlayer } from './midi-player.js';
       var rect = midiFolderEl.getBoundingClientRect();
       midiFolderDragX = e.clientX - rect.left;
       midiFolderDragY = e.clientY - rect.top;
+      // Clear initial centering transform on first drag
+      if (midiFolderEl.style.transform) {
+        midiFolderEl.style.top = rect.top + 'px';
+        midiFolderEl.style.transform = 'none';
+      }
+      document.body.classList.add('w95-dragging');
       e.preventDefault();
     });
     document.addEventListener('mousemove', function (e) {
       if (!midiFolderDragging) return;
-      midiFolderEl.style.left = (e.clientX - midiFolderDragX) + 'px';
-      midiFolderEl.style.top = (e.clientY - midiFolderDragY) + 'px';
-      midiFolderEl.style.transform = 'none';
+      var x = Math.max(0, Math.min(window.innerWidth - 60, e.clientX - midiFolderDragX));
+      var y = Math.max(0, Math.min(window.innerHeight - 20, e.clientY - midiFolderDragY));
+      midiFolderEl.style.left = x + 'px';
+      midiFolderEl.style.top = y + 'px';
     });
-    document.addEventListener('mouseup', function () { midiFolderDragging = false; });
+    document.addEventListener('mouseup', function () {
+      if (midiFolderDragging) document.body.classList.remove('w95-dragging');
+      midiFolderDragging = false;
+    });
 
     // Menu bar with functional dropdowns
     var menubar = document.createElement('div');
@@ -6454,31 +6700,46 @@ import { initMidiPlayer } from './midi-player.js';
     body.appendChild(midiFolderList);
     body.appendChild(statusbar);
 
-    // Resize handle
+    midiFolderEl.appendChild(titlebar);
+    midiFolderEl.appendChild(body);
+
+    // Resize handle — on outer window, not inside collapsible body
     var resizeHandle = document.createElement('div');
     resizeHandle.className = 'w95-resize-handle';
-    body.appendChild(resizeHandle);
+    midiFolderEl.appendChild(resizeHandle);
     var resizing = false, resizeStartX = 0, resizeStartY = 0, resizeStartW = 0, resizeStartH = 0;
     resizeHandle.addEventListener('mousedown', function (e) {
+      if (midiFolderMinimized) return;
       resizing = true;
+      // Clear centering transform so explicit height works
+      if (midiFolderEl.style.transform !== 'none') {
+        var rect = midiFolderEl.getBoundingClientRect();
+        midiFolderEl.style.top = rect.top + 'px';
+        midiFolderEl.style.transform = 'none';
+      }
       resizeStartX = e.clientX;
       resizeStartY = e.clientY;
       resizeStartW = midiFolderEl.offsetWidth;
       resizeStartH = midiFolderEl.offsetHeight;
+      document.body.classList.add('w95-resizing');
       e.preventDefault();
       e.stopPropagation();
     });
     document.addEventListener('mousemove', function (e) {
       if (!resizing) return;
-      var w = Math.max(180, resizeStartW + e.clientX - resizeStartX);
-      var h = Math.max(100, resizeStartH + e.clientY - resizeStartY);
+      var w = Math.max(160, Math.min(600, resizeStartW + e.clientX - resizeStartX));
+      var h = Math.max(80, Math.min(window.innerHeight - 40, resizeStartH + e.clientY - resizeStartY));
       midiFolderEl.style.width = w + 'px';
       midiFolderEl.style.height = h + 'px';
+      // Auto-adjust grid columns based on width
+      var cols = Math.max(2, Math.min(6, Math.floor((w - 16) / 72)));
+      midiFolderList.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
     });
-    document.addEventListener('mouseup', function () { resizing = false; });
+    document.addEventListener('mouseup', function () {
+      if (resizing) document.body.classList.remove('w95-resizing');
+      resizing = false;
+    });
 
-    midiFolderEl.appendChild(titlebar);
-    midiFolderEl.appendChild(body);
     document.body.appendChild(midiFolderEl);
 
     // Tooltip
@@ -6490,6 +6751,7 @@ import { initMidiPlayer } from './midi-player.js';
     // Default: collapsed
     midiFolderMinimized = true;
     body.style.display = 'none';
+    resizeHandle.style.display = 'none';
 
     refreshMidiFolder();
   }
@@ -6497,7 +6759,9 @@ import { initMidiPlayer } from './midi-player.js';
   function toggleMidiFolder() {
     midiFolderMinimized = !midiFolderMinimized;
     var body = midiFolderEl.querySelector('.w95-window-body');
+    var grip = midiFolderEl.querySelector('.w95-resize-handle');
     if (body) body.style.display = midiFolderMinimized ? 'none' : '';
+    if (grip) grip.style.display = midiFolderMinimized ? 'none' : '';
   }
 
   function refreshMidiFolder() {
@@ -6590,6 +6854,1197 @@ import { initMidiPlayer } from './midi-player.js';
   // Create folder window on load
   createMidiFolder();
 
+  // ═══ Pre-load Example MIDI files ═══
+  var EXAMPLE_MIDIS = [
+    { name: 'Better Off Alone.mid', path: '../Example_MIDI/better-off-alone.mid' },
+    { name: 'Kawaikute Gomen.mid', path: '../Example_MIDI/ke-aikutegomen-kawaikute-gomen-honeyworks-feat-chu-chan-cv-saori-hayami.mid' },
+    { name: 'Midu.mid', path: '../Example_MIDI/mi-du-shan-ge-midu.mid' }
+  ];
+  function loadExampleMidiFiles() {
+    var loaded = localStorage.getItem('sonicExamplesLoaded');
+    if (loaded) return;
+    getAllMidiFiles().then(function (existing) {
+      var existingNames = existing.map(function (f) { return f.name; });
+      var pending = EXAMPLE_MIDIS.filter(function (ex) {
+        return existingNames.indexOf(ex.name) === -1;
+      });
+      if (pending.length === 0) { localStorage.setItem('sonicExamplesLoaded', '1'); return; }
+      var done = 0;
+      pending.forEach(function (ex) {
+        fetch(ex.path).then(function (r) {
+          if (!r.ok) throw new Error(r.status);
+          return r.arrayBuffer();
+        }).then(function (buf) {
+          return saveMidiFile(ex.name, buf);
+        }).then(function () {
+          done++;
+          if (done >= pending.length) {
+            localStorage.setItem('sonicExamplesLoaded', '1');
+            refreshMidiFolder();
+          }
+        }).catch(function () { done++; });
+      });
+    });
+  }
+  loadExampleMidiFiles();
+
+  // ═══ Synth UI Components ═══
+
+  // Global knob drag handler (single listener, not per-knob)
+  document.addEventListener('mousemove', function (e) {
+    if (!_activeKnobDrag) return;
+    var dy = _activeKnobDrag.startY - e.clientY;
+    var sensitivity = e.shiftKey ? 600 : 200;
+    var newNorm = Math.max(0, Math.min(1, _activeKnobDrag.startNorm + dy / sensitivity));
+    _activeKnobDrag.update(newNorm);
+  });
+  document.addEventListener('mouseup', function () {
+    if (_activeKnobDrag) {
+      document.body.classList.remove('w95-dragging');
+      _activeKnobDrag = null;
+    }
+  });
+
+  // ── Synth tooltip (Win95 help popup) ──
+  var _synthTipEl = document.createElement('div');
+  _synthTipEl.id = 'synth-tooltip';
+  document.body.appendChild(_synthTipEl);
+  var _synthTipTimer = null;
+  document.addEventListener('mouseover', function (e) {
+    var target = e.target.closest('[data-synth-tip]');
+    if (!target) {
+      clearTimeout(_synthTipTimer);
+      _synthTipEl.style.display = 'none';
+      return;
+    }
+    clearTimeout(_synthTipTimer);
+    _synthTipTimer = setTimeout(function () {
+      _synthTipEl.textContent = target.getAttribute('data-synth-tip');
+      _synthTipEl.style.display = 'block';
+      var rect = target.getBoundingClientRect();
+      var tipW = _synthTipEl.offsetWidth;
+      var tipH = _synthTipEl.offsetHeight;
+      var x = rect.left + rect.width / 2 - tipW / 2;
+      var y = rect.top - tipH - 4;
+      if (y < 2) y = rect.bottom + 4;
+      if (x < 2) x = 2;
+      if (x + tipW > window.innerWidth - 2) x = window.innerWidth - tipW - 2;
+      _synthTipEl.style.left = x + 'px';
+      _synthTipEl.style.top = y + 'px';
+    }, 350);
+  });
+  document.addEventListener('mouseout', function (e) {
+    var target = e.target.closest('[data-synth-tip]');
+    if (target) {
+      clearTimeout(_synthTipTimer);
+      _synthTipEl.style.display = 'none';
+    }
+  });
+
+  function createKnob(opts) {
+    var min = opts.min != null ? opts.min : 0;
+    var max = opts.max != null ? opts.max : 1;
+    var step = opts.step || 0;
+    var currentValue = opts.value != null ? opts.value : min;
+    var format = opts.format || function (v) { return v.toFixed(2); };
+
+    var wrap = document.createElement('div');
+    wrap.className = 'synth-knob-wrap';
+
+    // SVG knob (matches EQ mixer style)
+    var sz = 32, cx = 16, cy = 16, r = 12;
+    var startAngle = 135, endAngle = 405;
+    function polarToXY(angle, rad) {
+      var a = (angle - 90) * Math.PI / 180;
+      return { x: cx + rad * Math.cos(a), y: cy + rad * Math.sin(a) };
+    }
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', sz); svg.setAttribute('height', sz);
+    svg.setAttribute('viewBox', '0 0 ' + sz + ' ' + sz);
+    svg.style.cursor = 'ns-resize';
+    svg.style.display = 'block';
+    // Gradient def
+    var defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    var grad = document.createElementNS('http://www.w3.org/2000/svg', 'radialGradient');
+    var gid = 'skGrad_' + Math.random().toString(36).slice(2, 8);
+    grad.id = gid;
+    grad.setAttribute('cx', '40%'); grad.setAttribute('cy', '35%');
+    var s1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+    s1.setAttribute('offset', '0%'); s1.setAttribute('stop-color', '#d8d8d8');
+    var s2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+    s2.setAttribute('offset', '100%'); s2.setAttribute('stop-color', '#808080');
+    grad.appendChild(s1); grad.appendChild(s2);
+    defs.appendChild(grad);
+    svg.appendChild(defs);
+    // Background arc track
+    var bgS = polarToXY(startAngle, r);
+    var bgE = polarToXY(endAngle, r);
+    var bgArc = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    bgArc.setAttribute('d', 'M ' + bgS.x + ' ' + bgS.y + ' A ' + r + ' ' + r + ' 0 1 1 ' + bgE.x + ' ' + bgE.y);
+    bgArc.setAttribute('fill', 'none');
+    bgArc.setAttribute('stroke', '#a0a0a0');
+    bgArc.setAttribute('stroke-width', '2.5');
+    bgArc.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(bgArc);
+    // Value arc
+    var valArc = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    valArc.setAttribute('fill', 'none');
+    valArc.setAttribute('stroke', '#404040');
+    valArc.setAttribute('stroke-width', '2.5');
+    valArc.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(valArc);
+    // Knob body
+    var body = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    body.setAttribute('cx', cx); body.setAttribute('cy', cy); body.setAttribute('r', r - 3);
+    body.setAttribute('fill', 'url(#' + gid + ')');
+    body.setAttribute('stroke', '#606060');
+    body.setAttribute('stroke-width', '0.5');
+    svg.appendChild(body);
+    // Indicator line
+    var indicator = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    indicator.setAttribute('stroke', '#000');
+    indicator.setAttribute('stroke-width', '2');
+    indicator.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(indicator);
+
+    var valueEl = document.createElement('span');
+    valueEl.className = 'synth-knob-value';
+    var labelEl = document.createElement('span');
+    labelEl.className = 'synth-knob-label';
+    labelEl.textContent = opts.label || '';
+
+    wrap.appendChild(svg);
+    wrap.appendChild(valueEl);
+    wrap.appendChild(labelEl);
+    if (opts.tooltip) wrap.setAttribute('data-synth-tip', opts.tooltip);
+
+    function normFromValue(v) { return (v - min) / (max - min); }
+    function valueFromNorm(n) {
+      var v = min + n * (max - min);
+      if (step > 0) v = Math.round(v / step) * step;
+      return Math.max(min, Math.min(max, v));
+    }
+    function updateVisual() {
+      var norm = normFromValue(currentValue);
+      // Value arc
+      var sweep = norm * 270;
+      if (sweep > 0.5) {
+        var vEnd = polarToXY(startAngle + sweep, r);
+        var large = sweep > 180 ? 1 : 0;
+        valArc.setAttribute('d', 'M ' + bgS.x + ' ' + bgS.y + ' A ' + r + ' ' + r + ' 0 ' + large + ' 1 ' + vEnd.x + ' ' + vEnd.y);
+      } else {
+        valArc.setAttribute('d', '');
+      }
+      // Indicator
+      var iAngle = startAngle + norm * 270;
+      var iInner = polarToXY(iAngle, r - 7);
+      var iOuter = polarToXY(iAngle, r - 2);
+      indicator.setAttribute('x1', iInner.x); indicator.setAttribute('y1', iInner.y);
+      indicator.setAttribute('x2', iOuter.x); indicator.setAttribute('y2', iOuter.y);
+      valueEl.textContent = format(currentValue);
+    }
+
+    svg.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.body.classList.add('w95-dragging');
+      _activeKnobDrag = {
+        startY: e.clientY,
+        startNorm: normFromValue(currentValue),
+        update: function (norm) {
+          var newVal = valueFromNorm(norm);
+          if (newVal !== currentValue) {
+            currentValue = newVal;
+            updateVisual();
+            if (opts.onChange) opts.onChange(currentValue);
+          }
+        }
+      };
+    });
+
+    updateVisual();
+    wrap.getValue = function () { return currentValue; };
+    wrap.setValue = function (v) { currentValue = Math.max(min, Math.min(max, v)); updateVisual(); };
+    return wrap;
+  }
+
+  function createCycleButton(opts) {
+    var currentIndex = opts.values.indexOf(opts.current);
+    if (currentIndex === -1) currentIndex = 0;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'synth-cycle-wrap';
+
+    var btn = document.createElement('button');
+    btn.className = 'synth-cycle-btn';
+    btn.textContent = opts.values[currentIndex];
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      currentIndex = (currentIndex + 1) % opts.values.length;
+      btn.textContent = opts.values[currentIndex];
+      if (opts.onChange) opts.onChange(opts.values[currentIndex]);
+    });
+
+    var lbl = document.createElement('span');
+    lbl.className = 'synth-cycle-label';
+    lbl.textContent = opts.label || '';
+
+    wrap.appendChild(btn);
+    wrap.appendChild(lbl);
+    if (opts.tooltip) wrap.setAttribute('data-synth-tip', opts.tooltip);
+    wrap.getValue = function () { return opts.values[currentIndex]; };
+    wrap.setValue = function (v) {
+      var i = opts.values.indexOf(v);
+      if (i !== -1) { currentIndex = i; btn.textContent = v; }
+    };
+    return wrap;
+  }
+
+  function createFader(opts) {
+    var min = opts.min != null ? opts.min : 0;
+    var max = opts.max != null ? opts.max : 1;
+    var step = opts.step || 0;
+    var currentValue = opts.value != null ? opts.value : min;
+    var format = opts.format || function (v) { return v.toFixed(2); };
+    var trackHeight = opts.height || 80;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'synth-fader-wrap';
+
+    var labelEl = document.createElement('span');
+    labelEl.className = 'synth-fader-label';
+    labelEl.textContent = opts.label || '';
+
+    var track = document.createElement('div');
+    track.className = 'synth-fader-track';
+    track.style.height = trackHeight + 'px';
+
+    var fill = document.createElement('div');
+    fill.className = 'synth-fader-fill';
+    if (opts.accent) fill.style.setProperty('--fader-accent', opts.accent);
+
+    var thumb = document.createElement('div');
+    thumb.className = 'synth-fader-thumb';
+
+    track.appendChild(fill);
+    track.appendChild(thumb);
+
+    var valueEl = document.createElement('span');
+    valueEl.className = 'synth-fader-value';
+
+    wrap.appendChild(labelEl);
+    wrap.appendChild(track);
+    wrap.appendChild(valueEl);
+
+    function normFromValue(v) { return (v - min) / (max - min); }
+    function valueFromNorm(n) {
+      var v = min + n * (max - min);
+      if (step > 0) v = Math.round(v / step) * step;
+      return Math.max(min, Math.min(max, v));
+    }
+    function updateVisual() {
+      var norm = normFromValue(currentValue);
+      var pxFromBottom = norm * (trackHeight - 12);
+      thumb.style.bottom = pxFromBottom + 'px';
+      fill.style.height = (norm * 100) + '%';
+      valueEl.textContent = format(currentValue);
+    }
+
+    track.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.body.classList.add('w95-dragging');
+      var rect = track.getBoundingClientRect();
+      var clickNorm = 1 - (e.clientY - rect.top) / rect.height;
+      clickNorm = Math.max(0, Math.min(1, clickNorm));
+      currentValue = valueFromNorm(clickNorm);
+      updateVisual();
+      if (opts.onChange) opts.onChange(currentValue);
+      _activeKnobDrag = {
+        startY: e.clientY,
+        startNorm: clickNorm,
+        update: function (norm) {
+          var newVal = valueFromNorm(norm);
+          if (newVal !== currentValue) {
+            currentValue = newVal;
+            updateVisual();
+            if (opts.onChange) opts.onChange(currentValue);
+          }
+        }
+      };
+    });
+
+    updateVisual();
+    wrap.getValue = function () { return currentValue; };
+    wrap.setValue = function (v) { currentValue = Math.max(min, Math.min(max, v)); updateVisual(); };
+    return wrap;
+  }
+
+  function createSectionDivider(label) {
+    var div = document.createElement('div');
+    div.className = 'synth-section-divider';
+    var lbl = document.createElement('span');
+    lbl.className = 'synth-section-label';
+    lbl.textContent = label;
+    div.appendChild(lbl);
+    return div;
+  }
+
+  function waveformSample(type, t) {
+    switch (type) {
+      case 'sine':     return Math.sin(t);
+      case 'square':   return Math.sin(t) >= 0 ? 1 : -1;
+      case 'sawtooth': return 2 * ((t / (Math.PI * 2)) % 1) - 1;
+      case 'triangle':
+        var ph = ((t / (Math.PI * 2)) % 1);
+        return ph < 0.5 ? (4 * ph - 1) : (3 - 4 * ph);
+      default: return Math.sin(t);
+    }
+  }
+
+  function drawOscWaveform(canvas, typeA, typeB, accentColor) {
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, w, h);
+    // Grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2);
+    ctx.moveTo(0, h / 4); ctx.lineTo(w, h / 4);
+    ctx.moveTo(0, h * 3 / 4); ctx.lineTo(w, h * 3 / 4);
+    ctx.stroke();
+    var cycles = 2;
+    // Draw B waveform (dimmer, behind)
+    if (typeB) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      for (var x = 0; x < w; x++) {
+        var t = (x / w) * cycles * Math.PI * 2;
+        var y = waveformSample(typeB, t);
+        var py = (h / 2) - y * (h / 2 - 4);
+        if (x === 0) ctx.moveTo(x, py); else ctx.lineTo(x, py);
+      }
+      ctx.stroke();
+    }
+    // Draw A waveform (bright, in front)
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = accentColor;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    for (var x2 = 0; x2 < w; x2++) {
+      var t2 = (x2 / w) * cycles * Math.PI * 2;
+      var y2 = waveformSample(typeA, t2);
+      var py2 = (h / 2) - y2 * (h / 2 - 4);
+      if (x2 === 0) ctx.moveTo(x2, py2); else ctx.lineTo(x2, py2);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // Labels
+    ctx.font = 'bold 8px Tahoma';
+    ctx.fillStyle = accentColor;
+    ctx.globalAlpha = 0.7;
+    ctx.fillText('A', 3, 10);
+    if (typeB) {
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.fillText('B', 3, h - 4);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function bringToFront(el) {
+    _topZIndex += 1;
+    el.style.zIndex = '' + _topZIndex;
+  }
+
+  // ═══ Synth Descriptions (hover tooltips) ═══
+  var SYNTH_DESCRIPTIONS = [
+    'Crystalline Lead — Clean, cutting dual-saw lead (Sylenth1 style). Unison chorus, warm saturation. Presets: Supersaw / Acid 303 / Soft.',
+    'Glass Bell — DX7 FM bell with inharmonic partials (3.5\u00d7 ratio). Crystalline shimmer, fast decay. Presets: EP Piano / Chime / Kalimba.',
+    'Hypersaw — JP-8000 supersaw with 3-layer detuned saws + sub. Wide stereo, moderate drive. Presets: Trance / Cinematic / Gritty.',
+    'Pluck — Expressive plucked synth (Serum style). Dramatic filter sweep 5200\u21920Hz, high resonance transient. Presets: Guitar / Marimba / SynthPluck.',
+    'Cathedral Organ — Hammond B3 drawbar registration (8\u2032+4\u2032+2\u2154\u2032+16\u2032). Tube warmth, high sustain. Presets: Jazz / Church / Percussion.',
+    'Abyss Bass — Reese bass (detuned saw pair) + clean sub foundation. Tight 650Hz lowpass, tanh warmth. Presets: 808 Sub / Growl / Acid.',
+    'Chip Crunch — Authentic NES 2A03 pulse channel. Clean square + octave double, open filter, DAC clipping. Presets: NES / C64 SID / Crush.'
+  ];
+
+  // ═══ Synth Variations (presets per synth) ═══
+  //
+  // Each variation's fn() mutates SYNTH_PRESETS[idx]. After fn(),
+  // applySynthVariation() auto-derives Short/Sched from Sust values.
+  // Only modify *Sust env values inside fn. Other params are direct.
+  //
+  var SYNTH_VARIATIONS = [
+    // ── 0: Crystalline Lead ──
+    [{ name: 'Init' },
+     { name: 'Supersaw', fn: function (P) {
+        // Widen detune for fatter unison; boost oscB for balanced stereo
+        P.oscA.detuneCenter = -8; P.oscB.detuneCenter = 8; P.oscB.gain = 0.44;
+        P.drive.amount = 1.5; P.lowpass.baseFreq = 2600;
+     }},
+     { name: 'Acid', fn: function (P) {
+        // TB-303 style: tight filter, high resonance, punchy envelope
+        P.lowpass.baseFreq = 1200; P.lowpass.Q = 1.3; P.lowpass.Qvel = 0.4;
+        P.lowpass.sustainFreq = 600; P.drive.amount = 2.2; P.drive.type = 'tanh';
+        P.env.decSust = 0.1; P.env.susSust = 0.2; P.env.relSust = 0.2;
+     }},
+     { name: 'Soft', fn: function (P) {
+        // Mellow lead: sine-like character, gentle presence
+        P.oscA.type = 'triangle'; P.oscB.type = 'sine'; P.oscB.gain = 0.2;
+        P.drive.amount = 0.5; P.presence.gainBase = 0.3; P.lowpass.baseFreq = 1800;
+     }},
+     { name: 'Portamento', fn: function (P) {
+        // Smooth glide lead: slower attack, warm filter, vocal quality
+        P.env.atkSust = 0.018; P.env.susSust = 0.7; P.env.relSust = 0.35;
+        P.lowpass.baseFreq = 2200; P.lowpass.Q = 0.9;
+        P.drive.amount = 0.8; P.presence.gainBase = 0.7;
+     }},
+     { name: 'Brass', fn: function (P) {
+        // Synth brass: bright attack, saw stack, high sustain
+        P.oscA.type = 'sawtooth'; P.oscB.type = 'sawtooth';
+        P.oscA.detuneCenter = -3; P.oscB.detuneCenter = 3; P.oscB.gain = 0.38;
+        P.lowpass.baseFreq = 3200; P.lowpass.sustainFreq = 2400;
+        P.env.atkSust = 0.012; P.env.susSust = 0.72; P.drive.amount = 1.0;
+     }}],
+    // ── 1: Glass Bell ──
+    [{ name: 'Init' },
+     { name: 'EP', fn: function (P) {
+        // Rhodes-style electric piano: harmonic ratio, warmer, more sustain
+        P.oscB.freqRatio = 2.0; P.lowpass.baseFreq = 2800; P.lowpass.sustainFreq = 1800;
+        P.env.decSust = 0.5; P.env.susSust = 0.25; P.env.relSust = 0.7;
+        P.drive.amount = 0.8; P.presence.gainBase = 0.6;
+     }},
+     { name: 'Chime', fn: function (P) {
+        // Wind chime: brighter, faster decay, more shimmer
+        P.lowpass.baseFreq = 6500; P.lowpass.sustainFreq = 3200;
+        P.env.decSust = 0.15; P.env.susSust = 0.04; P.env.relSust = 0.8;
+        P.air.gainBase = 0.2; P.air.gainPitch = 0.06;
+     }},
+     { name: 'Kalimba', fn: function (P) {
+        // Thumb piano: woody, lower harmonics, tight decay
+        P.oscB.freqRatio = 4.0; P.oscB.gain = 0.15; P.air.gainBase = 0.04;
+        P.lowpass.baseFreq = 2200; P.lowpass.sustainFreq = 1200;
+        P.env.decSust = 0.1; P.env.susSust = 0.02; P.env.relSust = 0.3;
+     }},
+     { name: 'Celesta', fn: function (P) {
+        // Celesta: glassy, high shimmer, fast decay, ethereal
+        P.oscB.freqRatio = 5.0; P.oscB.gain = 0.22; P.air.gainBase = 0.16;
+        P.lowpass.baseFreq = 5800; P.lowpass.sustainFreq = 2800;
+        P.env.decSust = 0.18; P.env.susSust = 0.06; P.env.relSust = 0.6;
+     }},
+     { name: 'Vibes', fn: function (P) {
+        // Vibraphone: warm, medium sustain, gentle tremolo character
+        P.oscB.freqRatio = 2.0; P.oscB.gain = 0.12;
+        P.lowpass.baseFreq = 3200; P.lowpass.sustainFreq = 2200;
+        P.env.decSust = 0.35; P.env.susSust = 0.18; P.env.relSust = 0.55;
+        P.drive.amount = 0.4; P.air.gainBase = 0.08;
+     }}],
+    // ── 3: Hypersaw ──
+    [{ name: 'Init' },
+     { name: 'Trance', fn: function (P) {
+        // Classic trance lead: brighter filter, punchy attack, less sustain
+        P.lowpass.baseFreq = 3600; P.lowpass.sustainFreq = 2600;
+        P.env.atkSust = 0.001; P.env.decSust = 0.12; P.env.susSust = 0.4;
+        P.presence.gainBase = 0.85;
+     }},
+     { name: 'Cinematic', fn: function (P) {
+        // Film score: ultra-wide, slow attack, very high sustain, darker
+        P.oscA.detuneCenter = -14; P.oscB.detuneCenter = 14;
+        P.env.atkSust = 0.025; P.env.susSust = 0.78; P.env.relSust = 0.65;
+        P.lowpass.baseFreq = 2000; P.lowpass.sustainFreq = 1800;
+     }},
+     { name: 'Gritty', fn: function (P) {
+        // Aggressive EDM: heavy drive, tighter filter, foldback distortion
+        P.drive.amount = 2.8; P.drive.type = 'foldback';
+        P.lowpass.baseFreq = 1800; P.lowpass.sustainFreq = 1400;
+        P.lowpass.Q = 1.0; P.presence.gainBase = 0.9;
+     }},
+     { name: 'Ambient', fn: function (P) {
+        // Ambient pad-like supersaw: slow attack, lush, wide stereo
+        P.oscA.detuneCenter = -12; P.oscB.detuneCenter = 12;
+        P.env.atkSust = 0.06; P.env.susSust = 0.85; P.env.relSust = 0.9;
+        P.lowpass.baseFreq = 1600; P.lowpass.sustainFreq = 1400;
+        P.drive.amount = 0.6;
+     }},
+     { name: 'Hoover', fn: function (P) {
+        // Classic rave hoover: detuned saw, resonant mid-range
+        P.oscA.detuneCenter = -6; P.oscB.detuneCenter = 7;
+        P.lowpass.baseFreq = 2200; P.lowpass.Q = 1.2;
+        P.drive.amount = 2.0; P.drive.type = 'tanh';
+        P.env.atkSust = 0.008; P.env.susSust = 0.6;
+     }}],
+    // ── 4: Pluck ──
+    [{ name: 'Init' },
+     { name: 'Guitar', fn: function (P) {
+        // Nylon guitar: warmer body, slower decay, less filter sweep
+        P.lowpass.baseFreq = 3500; P.lowpass.sustainFreq = 1200; P.lowpass.Q = 0.7;
+        P.env.decSust = 0.28; P.env.susSust = 0.1; P.env.relSust = 0.4;
+        P.oscA.type = 'triangle'; P.oscB.type = 'sawtooth'; P.oscB.gain = 0.2;
+     }},
+     { name: 'Marimba', fn: function (P) {
+        // Mallet percussion: sine-like, fast decay, dark
+        P.oscA.type = 'sine'; P.oscB.type = 'sine'; P.oscB.gain = 0.12;
+        P.lowpass.baseFreq = 2400; P.lowpass.sustainFreq = 800;
+        P.env.decSust = 0.06; P.env.susSust = 0.01; P.env.relSust = 0.15;
+        P.air.gainBase = 0.04;
+     }},
+     { name: 'SynthPlk', fn: function (P) {
+        // Synth pluck: resonant, brighter, longer tail
+        P.lowpass.Q = 1.4; P.lowpass.Qvel = 0.35; P.lowpass.baseFreq = 6000;
+        P.env.decSust = 0.2; P.env.susSust = 0.08; P.env.relSust = 0.45;
+        P.presence.gainBase = 1.3; P.drive.amount = 1.2;
+     }},
+     { name: 'Harp', fn: function (P) {
+        // Concert harp: bright attack, warm body, long release
+        P.oscA.type = 'triangle'; P.oscB.type = 'sine'; P.oscB.gain = 0.15;
+        P.lowpass.baseFreq = 4500; P.lowpass.sustainFreq = 1800;
+        P.env.decSust = 0.22; P.env.susSust = 0.06; P.env.relSust = 0.7;
+        P.air.gainBase = 0.1;
+     }},
+     { name: 'Pizz', fn: function (P) {
+        // Pizzicato strings: very short, snappy, clean
+        P.oscA.type = 'sawtooth'; P.oscB.type = 'triangle'; P.oscB.gain = 0.18;
+        P.lowpass.baseFreq = 4000; P.lowpass.sustainFreq = 1000;
+        P.env.decSust = 0.04; P.env.susSust = 0.0; P.env.relSust = 0.1;
+        P.drive.amount = 0.6;
+     }}],
+    // ── 5: Cathedral Organ ──
+    [{ name: 'Init' },
+     { name: 'Jazz', fn: function (P) {
+        // Jazz combo organ: less air, warmer filter, softer character
+        P.air.gainBase = 0.06; P.lowpass.baseFreq = 2000; P.lowpass.sustainFreq = 1800;
+        P.sub.gainBase = 0.05; P.drive.amount = 0.3; P.oscB.gain = 0.18;
+     }},
+     { name: 'Church', fn: function (P) {
+        // Full pipe organ: more sub, wider harmonics, spacious release
+        P.sub.gainBase = 0.14; P.oscB.gain = 0.36; P.air.gainBase = 0.22;
+        P.lowpass.baseFreq = 4200; P.lowpass.sustainFreq = 3800;
+        P.env.relSust = 0.7; P.drive.amount = 0.9;
+     }},
+     { name: 'Perc', fn: function (P) {
+        // Hammond percussion: fast click attack, then sustain
+        P.env.atkSust = 0.001; P.env.decSust = 0.08; P.env.susSust = 0.65;
+        P.lowpass.baseFreq = 4500; P.presence.gainBase = 0.8;
+        P.air.gainBase = 0.1; P.drive.amount = 1.2; P.drive.type = 'tanh';
+     }},
+     { name: 'Gospel', fn: function (P) {
+        // Gospel organ: rich harmonics, full drawbars, overdriven warmth
+        P.oscB.gain = 0.4; P.sub.gainBase = 0.16; P.air.gainBase = 0.2;
+        P.lowpass.baseFreq = 3800; P.lowpass.sustainFreq = 3200;
+        P.drive.amount = 1.6; P.drive.type = 'tanh'; P.env.relSust = 0.4;
+     }},
+     { name: 'Reed', fn: function (P) {
+        // Accordion/harmonium reed organ: nasal, tight, buzzy
+        P.oscA.type = 'square'; P.oscB.type = 'sawtooth'; P.oscB.gain = 0.22;
+        P.lowpass.baseFreq = 2200; P.lowpass.sustainFreq = 2000; P.lowpass.Q = 1.1;
+        P.drive.amount = 0.7; P.presence.gainBase = 1.0;
+        P.env.atkSust = 0.005; P.env.relSust = 0.12;
+     }}],
+    // ── 6: Abyss Bass ──
+    [{ name: 'Init' },
+     { name: 'Sub', fn: function (P) {
+        // 808 sub bass: clean sine, minimal harmonics, pure low end
+        P.oscA.type = 'sine'; P.oscA.detuneCenter = 0;
+        P.oscB.gain = 0; P.lowpass.baseFreq = 300; P.lowpass.sustainFreq = 250;
+        P.drive.amount = 0.4; P.sub.gainBase = 0.2;
+     }},
+     { name: 'Growl', fn: function (P) {
+        // Dubstep growl: heavy distortion, more filter, aggressive
+        P.drive.amount = 3.5; P.drive.type = 'foldback';
+        P.lowpass.baseFreq = 1000; P.lowpass.sustainFreq = 800; P.lowpass.Q = 1.1;
+        P.oscA.detuneCenter = -4; P.oscB.detuneCenter = 4;
+     }},
+     { name: 'Acid', fn: function (P) {
+        // Acid bass: 303-style resonant filter, higher cutoff, tanh warmth
+        P.lowpass.baseFreq = 1200; P.lowpass.sustainFreq = 500;
+        P.lowpass.Q = 1.3; P.lowpass.Qvel = 0.35;
+        P.drive.amount = 2.2; P.drive.type = 'tanh';
+        P.env.decSust = 0.1; P.env.susSust = 0.3;
+     }},
+     { name: 'FM Bass', fn: function (P) {
+        // DX7-style FM bass: punchy, clean, percussive
+        P.oscA.type = 'sine'; P.oscB.type = 'sine'; P.oscB.freqRatio = 2.0;
+        P.oscB.gain = 0.3; P.oscA.detuneCenter = 0; P.oscB.detuneCenter = 0;
+        P.lowpass.baseFreq = 2000; P.lowpass.sustainFreq = 600;
+        P.env.decSust = 0.08; P.env.susSust = 0.2; P.drive.amount = 0.6;
+     }},
+     { name: 'Wobble', fn: function (P) {
+        // Dubstep wobble: mid-range, heavy distortion, resonant sweep
+        P.oscA.detuneCenter = -2; P.oscB.detuneCenter = 2;
+        P.drive.amount = 3.0; P.drive.type = 'foldback';
+        P.lowpass.baseFreq = 1400; P.lowpass.sustainFreq = 600;
+        P.lowpass.Q = 1.5; P.env.susSust = 0.5;
+     }}],
+    // ── 7: Chip Crunch ──
+    [{ name: 'Init' },
+     { name: 'NES', fn: function (P) {
+        // NES pulse: brighter, punchier, authentic 2A03 character
+        P.lowpass.baseFreq = 6500; P.lowpass.sustainFreq = 6000;
+        P.env.decSust = 0.08; P.env.susSust = 0.5; P.env.relSust = 0.1;
+        P.presence.gainBase = 0.9; P.drive.amount = 1.2;
+     }},
+     { name: 'C64', fn: function (P) {
+        // Commodore 64 SID chip: sawtooth, moderate filter, slight detune
+        P.oscA.type = 'sawtooth'; P.oscB.type = 'sawtooth'; P.oscB.freqRatio = 1.0;
+        P.oscA.detuneCenter = -0.5; P.oscB.detuneCenter = 0.5;
+        P.lowpass.baseFreq = 3000; P.lowpass.sustainFreq = 2400;
+        P.drive.amount = 1.0;
+     }},
+     { name: 'Crush', fn: function (P) {
+        // Bit-crushed: heavy saturation, darker, lo-fi character
+        P.drive.amount = 3.2; P.drive.type = 'tanh';
+        P.lowpass.baseFreq = 3000; P.lowpass.sustainFreq = 2200;
+        P.env.decSust = 0.06; P.env.susSust = 0.15; P.env.relSust = 0.08;
+     }},
+     { name: 'Arp', fn: function (P) {
+        // Chiptune arpeggio: fast decay, bright, classic game music
+        P.oscA.type = 'square'; P.oscB.type = 'square'; P.oscB.freqRatio = 2.0;
+        P.oscB.gain = 0.2; P.lowpass.baseFreq = 5000; P.lowpass.sustainFreq = 4500;
+        P.env.decSust = 0.04; P.env.susSust = 0.0; P.env.relSust = 0.05;
+     }},
+     { name: 'Retro', fn: function (P) {
+        // 80s retro synth: warm triangle, moderate drive, nostalgic
+        P.oscA.type = 'triangle'; P.oscB.type = 'square';
+        P.oscB.gain = 0.15; P.oscB.freqRatio = 1.0;
+        P.lowpass.baseFreq = 2400; P.lowpass.sustainFreq = 2000;
+        P.drive.amount = 1.4; P.drive.type = 'softclip';
+        P.env.susSust = 0.55; P.env.relSust = 0.25;
+     }}]
+  ];
+
+  function snapshotSynthPresets() {
+    if (_synthOriginals) return;
+    _synthOriginals = SYNTH_PRESETS.map(function (p) {
+      return JSON.parse(JSON.stringify({
+        oscA: p.oscA, oscB: p.oscB, lowpass: p.lowpass, env: p.env, drive: p.drive,
+        sub: p.sub, air: p.air, presence: p.presence
+      }));
+    });
+  }
+
+  function resetSynthToOriginal(idx) {
+    if (!_synthOriginals) return;
+    var P = SYNTH_PRESETS[idx];
+    var O = _synthOriginals[idx];
+    P.oscA = JSON.parse(JSON.stringify(O.oscA));
+    P.oscB = O.oscB ? JSON.parse(JSON.stringify(O.oscB)) : null;
+    P.lowpass = JSON.parse(JSON.stringify(O.lowpass));
+    P.env = JSON.parse(JSON.stringify(O.env));
+    P.drive = JSON.parse(JSON.stringify(O.drive));
+    if (O.sub) P.sub = JSON.parse(JSON.stringify(O.sub));
+    if (O.air) P.air = JSON.parse(JSON.stringify(O.air));
+    if (O.presence) P.presence = JSON.parse(JSON.stringify(O.presence));
+  }
+
+  function applySynthVariation(idx, varIdx) {
+    snapshotSynthPresets();
+    resetSynthToOriginal(idx);
+    var v = SYNTH_VARIATIONS[idx][varIdx];
+    if (v && v.fn) v.fn(SYNTH_PRESETS[idx]);
+    _synthCurrentVar[idx] = varIdx;
+    // Recompute derived env values
+    var P = SYNTH_PRESETS[idx];
+    P.env.atkShort = P.env.atkSust * 0.6; P.env.atkSched = P.env.atkSust * 0.8;
+    P.env.decShort = P.env.decSust * 0.6; P.env.decSched = P.env.decSust * 0.8;
+    P.env.susShort = P.env.susSust * 0.6; P.env.susSched = P.env.susSust * 0.75;
+    P.env.relShort = P.env.relSust * 0.65; P.env.relSched = P.env.relSust * 0.8;
+  }
+
+  // ═══ Live Oscilloscope ═══
+  function startSynthOscilloscope() {
+    if (_synthOscRunning) return;
+    _synthOscRunning = true;
+    function drawLoop() {
+      if (!_synthOscCanvas || !synthEditorEl || synthEditorEl.style.display === 'none') {
+        _synthOscRunning = false;
+        return;
+      }
+      drawSynthOscilloscope();
+      requestAnimationFrame(drawLoop);
+    }
+    requestAnimationFrame(drawLoop);
+  }
+
+  function drawSynthOscilloscope() {
+    if (!_synthOscCanvas) return;
+    var canvas = _synthOscCanvas;
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+
+    ctx.fillStyle = '#0a0a18';
+    ctx.fillRect(0, 0, w, h);
+
+    // Grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.25); ctx.lineTo(w, h * 0.25);
+    ctx.moveTo(0, h * 0.5); ctx.lineTo(w, h * 0.5);
+    ctx.moveTo(0, h * 0.75); ctx.lineTo(w, h * 0.75);
+    for (var gx = 0; gx < w; gx += w / 8) { ctx.moveTo(gx, 0); ctx.lineTo(gx, h); }
+    ctx.stroke();
+
+    if (!analyser || !audioCtx) return;
+    if (!analyser._tdBuf) analyser._tdBuf = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(analyser._tdBuf);
+    var data = analyser._tdBuf;
+
+    var accent = _synthOscAccent || '#4080c0';
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 4;
+    ctx.beginPath();
+    var sliceW = w / data.length;
+    for (var i = 0; i < data.length; i++) {
+      var v = data[i] / 128.0;
+      var y = v * h / 2;
+      if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * sliceW, y);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  // ═══ Synth Rack (Channel Rack) ═══
+
+  function createSynthRack() {
+    synthRackEl = document.createElement('div');
+    synthRackEl.id = 'synth-rack-window';
+    synthRackEl.className = 'w95-window';
+    synthRackEl.style.left = '12px';
+    synthRackEl.style.bottom = '100px';
+    synthRackEl.style.top = 'auto';
+    synthRackEl.style.right = 'auto';
+    synthRackEl.style.transform = 'none';
+    synthRackEl.style.width = '185px';
+    synthRackEl.style.zIndex = '1500';
+
+    var titlebar = document.createElement('div');
+    titlebar.className = 'w95-titlebar';
+    var icon = document.createElement('span');
+    icon.className = 'w95-titlebar-icon';
+    icon.textContent = '\uD83C\uDFB9';
+    var title = document.createElement('span');
+    title.className = 'w95-titlebar-text';
+    title.textContent = ' Instruments';
+    var btns = document.createElement('div');
+    btns.className = 'w95-titlebar-buttons';
+    var btnMin = document.createElement('button');
+    btnMin.textContent = '_';
+    btnMin.title = 'Minimize';
+    btnMin.addEventListener('click', function (e) { e.stopPropagation(); toggleSynthRack(); });
+    var btnClose = document.createElement('button');
+    btnClose.textContent = '\u00D7';
+    btnClose.title = 'Close';
+    btnClose.addEventListener('click', function (e) { e.stopPropagation(); synthRackEl.style.display = 'none'; });
+    btns.appendChild(btnMin);
+    btns.appendChild(btnClose);
+    titlebar.appendChild(icon);
+    titlebar.appendChild(title);
+    titlebar.appendChild(btns);
+
+    // Drag
+    titlebar.addEventListener('mousedown', function (e) {
+      if (e.target.tagName === 'BUTTON') return;
+      synthRackDragging = true;
+      var rect = synthRackEl.getBoundingClientRect();
+      // Convert bottom-positioning to top-positioning for drag
+      if (synthRackEl.style.bottom && synthRackEl.style.bottom !== 'auto') {
+        synthRackEl.style.top = rect.top + 'px';
+        synthRackEl.style.bottom = 'auto';
+      }
+      synthRackDragX = e.clientX - rect.left;
+      synthRackDragY = e.clientY - rect.top;
+      document.body.classList.add('w95-dragging');
+      bringToFront(synthRackEl);
+      e.preventDefault();
+    });
+
+    var body = document.createElement('div');
+    body.className = 'w95-window-body';
+
+    var list = document.createElement('div');
+    list.className = 'synth-rack-list';
+
+    SYNTH_PRESETS.forEach(function (preset, idx) {
+      var row = document.createElement('div');
+      row.className = 'synth-rack-row';
+      row.dataset.synthIdx = idx;
+      row.title = SYNTH_DESCRIPTIONS[idx] || preset.name;
+      if (idx === currentSynthIdx) row.classList.add('active');
+
+      var light = document.createElement('div');
+      light.className = 'synth-rack-light';
+      light.style.backgroundColor = preset.ui.accent;
+      light.style.color = preset.ui.accent;
+      if (idx === currentSynthIdx) light.classList.add('on');
+
+      var iconSpan = document.createElement('span');
+      iconSpan.className = 'synth-rack-icon';
+      iconSpan.textContent = preset.ui.icon;
+
+      var name = document.createElement('span');
+      name.className = 'synth-rack-name';
+      name.textContent = preset.name;
+
+      var openBtn = document.createElement('button');
+      openBtn.className = 'synth-rack-open-btn';
+      openBtn.textContent = '\u25B6';
+      openBtn.title = 'Open ' + preset.name;
+      openBtn.addEventListener('click', function (e) { e.stopPropagation(); openSynthWindow(idx); });
+
+      row.appendChild(light);
+      row.appendChild(iconSpan);
+      row.appendChild(name);
+      row.appendChild(openBtn);
+
+      row.addEventListener('click', function () { openSynthWindow(idx); });
+
+      list.appendChild(row);
+    });
+
+    var statusbar = document.createElement('div');
+    statusbar.className = 'w95-statusbar';
+    statusbar.id = 'synth-rack-status';
+    statusbar.textContent = SYNTH_PRESETS[currentSynthIdx].name;
+
+    body.appendChild(list);
+    body.appendChild(statusbar);
+    synthRackEl.appendChild(titlebar);
+    synthRackEl.appendChild(body);
+    document.body.appendChild(synthRackEl);
+  }
+
+  function selectSynthInRack(idx) {
+    currentSynthIdx = idx;
+    showModeToast('Synth: ' + SYNTH_PRESETS[idx].name);
+    refreshSynthRack();
+  }
+
+  function refreshSynthRack() {
+    if (!synthRackEl) return;
+    var rows = synthRackEl.querySelectorAll('.synth-rack-row');
+    for (var r = 0; r < rows.length; r++) {
+      var i = parseInt(rows[r].dataset.synthIdx);
+      rows[r].classList.toggle('active', i === currentSynthIdx);
+      var light = rows[r].querySelector('.synth-rack-light');
+      if (light) light.classList.toggle('on', i === currentSynthIdx);
+    }
+    var status = document.getElementById('synth-rack-status');
+    if (status) status.textContent = SYNTH_PRESETS[currentSynthIdx].name;
+  }
+
+  function toggleSynthRack() {
+    synthRackMinimized = !synthRackMinimized;
+    var body = synthRackEl.querySelector('.w95-window-body');
+    if (body) body.style.display = synthRackMinimized ? 'none' : '';
+  }
+
+  // ═══ Single Synth Editor Window ═══
+
+  function openSynthWindow(idx) {
+    if (idx !== currentSynthIdx) selectSynthInRack(idx);
+    snapshotSynthPresets();
+    synthEditorIdx = idx;
+    if (!synthEditorEl) {
+      synthEditorEl = buildSynthEditorFrame();
+      document.body.appendChild(synthEditorEl);
+    }
+    populateSynthEditor(idx);
+    synthEditorEl.style.display = '';
+    synthEditorEl.classList.remove('minimized');
+    synthEditorMinimized = false;
+    bringToFront(synthEditorEl);
+    if (!analyser && typeof initAnalyser === 'function') initAnalyser();
+    startSynthOscilloscope();
+  }
+
+  function buildSynthEditorFrame() {
+    var win = document.createElement('div');
+    win.className = 'w95-window synth-window';
+    win.id = 'synth-editor';
+    win.style.left = Math.max(30, Math.floor(window.innerWidth * 0.5 - 136)) + 'px';
+    win.style.top = Math.max(30, Math.floor(window.innerHeight * 0.5 - 170)) + 'px';
+    win.style.zIndex = '1520';
+
+    win.addEventListener('mousedown', function () { bringToFront(win); });
+
+    // === Titlebar ===
+    var titlebar = document.createElement('div');
+    titlebar.className = 'w95-titlebar';
+    titlebar.id = 'synth-editor-titlebar';
+
+    var tbIcon = document.createElement('span');
+    tbIcon.className = 'w95-titlebar-icon';
+    tbIcon.id = 'synth-editor-icon';
+    var tbText = document.createElement('span');
+    tbText.className = 'w95-titlebar-text';
+    tbText.id = 'synth-editor-title';
+    var tbBtns = document.createElement('div');
+    tbBtns.className = 'w95-titlebar-buttons';
+    var minBtn = document.createElement('button');
+    minBtn.textContent = '_';
+    minBtn.title = 'Minimize';
+    minBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      synthEditorMinimized = !synthEditorMinimized;
+      win.classList.toggle('minimized', synthEditorMinimized);
+    });
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u00D7';
+    closeBtn.title = 'Close';
+    closeBtn.addEventListener('click', function (e) { e.stopPropagation(); win.style.display = 'none'; });
+    tbBtns.appendChild(minBtn);
+    tbBtns.appendChild(closeBtn);
+    titlebar.appendChild(tbIcon);
+    titlebar.appendChild(tbText);
+    titlebar.appendChild(tbBtns);
+
+    // Drag
+    titlebar.addEventListener('mousedown', function (e) {
+      if (e.target.tagName === 'BUTTON') return;
+      synthEditorDragging = true;
+      var rect = win.getBoundingClientRect();
+      synthEditorDragX = e.clientX - rect.left;
+      synthEditorDragY = e.clientY - rect.top;
+      document.body.classList.add('w95-dragging');
+      e.preventDefault();
+    });
+
+    var body = document.createElement('div');
+    body.className = 'synth-window-body';
+    body.id = 'synth-editor-body';
+
+    win.appendChild(titlebar);
+    win.appendChild(body);
+    return win;
+  }
+
+  function populateSynthEditor(idx) {
+    var P = SYNTH_PRESETS[idx];
+    var ui = P.ui;
+
+    // Update titlebar
+    var titlebar = document.getElementById('synth-editor-titlebar');
+    if (titlebar) titlebar.style.background = 'linear-gradient(90deg, ' + ui.gradient[0] + ', ' + ui.gradient[1] + ')';
+    var tbIcon = document.getElementById('synth-editor-icon');
+    if (tbIcon) tbIcon.textContent = ui.icon;
+    var tbTitle = document.getElementById('synth-editor-title');
+    if (tbTitle) tbTitle.textContent = ' ' + P.name;
+
+    // Clear and rebuild body
+    var body = document.getElementById('synth-editor-body');
+    body.innerHTML = '';
+
+    var inner = document.createElement('div');
+    inner.className = 'synth-editor-inner';
+    inner.style.setProperty('--synth-accent', ui.accent);
+
+    // ── Live Oscilloscope ──
+    var oscScope = document.createElement('canvas');
+    oscScope.className = 'synth-oscilloscope';
+    oscScope.width = 258;
+    oscScope.height = 68;
+    inner.appendChild(oscScope);
+    _synthOscCanvas = oscScope;
+    _synthOscAccent = ui.accent;
+
+    // ── Preset selector ──
+    var presetRow = document.createElement('div');
+    presetRow.className = 'synth-preset-row';
+    var variations = SYNTH_VARIATIONS[idx] || [];
+    variations.forEach(function (v, vi) {
+      var btn = document.createElement('button');
+      btn.className = 'synth-preset-btn';
+      if (vi === _synthCurrentVar[idx]) btn.classList.add('active');
+      btn.textContent = v.name;
+      btn.addEventListener('click', function () {
+        applySynthVariation(idx, vi);
+        populateSynthEditor(idx);
+        startSynthOscilloscope();
+      });
+      presetRow.appendChild(btn);
+    });
+    inner.appendChild(presetRow);
+
+    // ── OSC Section — A/B rows with separate waveform displays ──
+    inner.appendChild(createSectionDivider('OSC'));
+    var wfA = document.createElement('canvas');
+    wfA.className = 'synth-waveform-canvas';
+    wfA.width = 72; wfA.height = 26;
+    wfA.style.width = '72px'; wfA.style.height = '26px';
+    var wfB = document.createElement('canvas');
+    wfB.className = 'synth-waveform-canvas';
+    wfB.width = 72; wfB.height = 26;
+    wfB.style.width = '72px'; wfB.style.height = '26px';
+    drawOscWaveform(wfA, P.oscA.type, null, ui.accent);
+    drawOscWaveform(wfB, P.oscB ? P.oscB.type : 'sine', null, 'rgba(255,255,255,0.4)');
+    var oscSection = document.createElement('div');
+    oscSection.className = 'synth-osc-section';
+    // Left: A row + B row
+    var oscControls = document.createElement('div');
+    oscControls.className = 'synth-osc-controls';
+    // Row A
+    var oscRowA = document.createElement('div');
+    oscRowA.className = 'synth-osc-row';
+    var lblA = document.createElement('span');
+    lblA.className = 'synth-osc-label';
+    lblA.textContent = 'A';
+    oscRowA.appendChild(lblA);
+    oscRowA.appendChild(wfA);
+    oscRowA.appendChild(createCycleButton({
+      label: '', values: ['sine', 'square', 'sawtooth', 'triangle'],
+      current: P.oscA.type,
+      tooltip: 'Oscillator A waveform\nSine: smooth, pure tone\nSquare: hollow, buzzy\nSawtooth: bright, rich harmonics\nTriangle: soft, mellow',
+      onChange: function (val) { P.oscA.type = val; drawOscWaveform(wfA, val, null, ui.accent); }
+    }));
+    oscRowA.appendChild(createKnob({
+      label: 'Det', min: -24, max: 24, value: P.oscA.detuneCenter, step: 0.1,
+      format: function (v) { return v.toFixed(1); },
+      tooltip: 'Oscillator A Detune (semitones)\nShift pitch for unison or interval effects',
+      onChange: function (v) { P.oscA.detuneCenter = v; }
+    }));
+    oscRowA.appendChild(createKnob({
+      label: 'Gain', min: 0, max: 1, value: P.oscA.gain, step: 0.01,
+      format: function (v) { return (v * 100).toFixed(0) + '%'; },
+      tooltip: 'Oscillator A Volume\nControls how loud Osc A is in the mix',
+      onChange: function (v) { P.oscA.gain = v; }
+    }));
+    oscControls.appendChild(oscRowA);
+    // Row B
+    var oscRowB = document.createElement('div');
+    oscRowB.className = 'synth-osc-row';
+    var lblB = document.createElement('span');
+    lblB.className = 'synth-osc-label';
+    lblB.textContent = 'B';
+    oscRowB.appendChild(lblB);
+    oscRowB.appendChild(wfB);
+    oscRowB.appendChild(createCycleButton({
+      label: '', values: ['sine', 'square', 'sawtooth', 'triangle'],
+      current: P.oscB ? P.oscB.type : 'sine',
+      tooltip: 'Oscillator B waveform\nLayered with Osc A for richer timbres',
+      onChange: function (val) { if (P.oscB) P.oscB.type = val; drawOscWaveform(wfB, val, null, 'rgba(255,255,255,0.4)'); }
+    }));
+    oscRowB.appendChild(createKnob({
+      label: 'Det', min: -24, max: 24, value: P.oscB ? P.oscB.detuneCenter : 0, step: 0.1,
+      format: function (v) { return v.toFixed(1); },
+      tooltip: 'Oscillator B Detune (semitones)\nSlightly detune from A for chorus effect',
+      onChange: function (v) { if (P.oscB) P.oscB.detuneCenter = v; }
+    }));
+    oscRowB.appendChild(createKnob({
+      label: 'Gain', min: 0, max: 1, value: P.oscB ? P.oscB.gain : 0, step: 0.01,
+      format: function (v) { return (v * 100).toFixed(0) + '%'; },
+      tooltip: 'Oscillator B Volume\nControls how loud Osc B is in the mix',
+      onChange: function (v) { if (P.oscB) P.oscB.gain = v; }
+    }));
+    oscControls.appendChild(oscRowB);
+    oscSection.appendChild(oscControls);
+    inner.appendChild(oscSection);
+
+    // ── FILTER / DRIVE ──
+    inner.appendChild(createSectionDivider('FILTER / DRIVE'));
+    var fdRow = document.createElement('div');
+    fdRow.className = 'synth-group-row';
+    fdRow.appendChild(createKnob({
+      label: 'Cutoff', min: 200, max: 8000, value: P.lowpass.baseFreq, step: 10,
+      format: function (v) { return v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v.toFixed(0); },
+      tooltip: 'Filter Cutoff Frequency (Hz)\nLower = darker, warmer\nHigher = brighter, more open',
+      onChange: function (v) { P.lowpass.baseFreq = v; }
+    }));
+    fdRow.appendChild(createKnob({
+      label: 'Reso', min: 0.3, max: 2.0, value: P.lowpass.Q, step: 0.01,
+      format: function (v) { return v.toFixed(2); },
+      tooltip: 'Filter Resonance (Q)\nBoosts frequencies near cutoff\nHigher = more pronounced peak',
+      onChange: function (v) { P.lowpass.Q = v; }
+    }));
+    fdRow.appendChild(createKnob({
+      label: 'Drive', min: 0.1, max: 5.0, value: P.drive.amount, step: 0.05,
+      format: function (v) { return v.toFixed(1); },
+      tooltip: 'Drive Amount\nAdds harmonic saturation and warmth\nHigher = more aggressive distortion',
+      onChange: function (v) { P.drive.amount = v; if (driveCurveCache.size > 50) driveCurveCache.clear(); }
+    }));
+    fdRow.appendChild(createCycleButton({
+      label: 'Type', values: ['tanh', 'foldback', 'softclip'],
+      current: P.drive.type,
+      tooltip: 'Drive Type\nTanh: warm analog saturation\nFoldback: aggressive wavefolder\nSoftclip: gentle tube-style clipping',
+      onChange: function (val) { P.drive.type = val; }
+    }));
+    inner.appendChild(fdRow);
+
+    // ── ENVELOPE ──
+    inner.appendChild(createSectionDivider('ENVELOPE'));
+    var envRow = document.createElement('div');
+    envRow.className = 'synth-group-row';
+    envRow.appendChild(createKnob({
+      label: 'Attack', min: 0.001, max: 0.2, value: P.env.atkSust, step: 0.001,
+      format: function (v) { return (v * 1000).toFixed(0) + 'ms'; },
+      tooltip: 'Attack Time\nHow quickly the note reaches full volume\nShort = percussive, Long = slow swell',
+      onChange: function (v) { P.env.atkSust = v; P.env.atkShort = v * 0.6; P.env.atkSched = v * 0.8; }
+    }));
+    envRow.appendChild(createKnob({
+      label: 'Decay', min: 0.01, max: 1.0, value: P.env.decSust, step: 0.01,
+      format: function (v) { return (v * 1000).toFixed(0) + 'ms'; },
+      tooltip: 'Decay Time\nHow quickly volume drops to sustain\nShort = plucky, Long = gradual fade',
+      onChange: function (v) { P.env.decSust = v; P.env.decShort = v * 0.6; P.env.decSched = v * 0.8; }
+    }));
+    envRow.appendChild(createKnob({
+      label: 'Sustain', min: 0, max: 1, value: P.env.susSust, step: 0.01,
+      format: function (v) { return (v * 100).toFixed(0) + '%'; },
+      tooltip: 'Sustain Level\nVolume while the note is held\n0% = dies after decay, 100% = full',
+      onChange: function (v) { P.env.susSust = v; P.env.susShort = v * 0.6; P.env.susSched = v * 0.75; }
+    }));
+    envRow.appendChild(createKnob({
+      label: 'Release', min: 0.05, max: 2.0, value: P.env.relSust, step: 0.01,
+      format: function (v) { return (v * 1000).toFixed(0) + 'ms'; },
+      tooltip: 'Release Time\nHow quickly sound fades after note ends\nShort = tight, Long = reverb-like tail',
+      onChange: function (v) { P.env.relSust = v; P.env.relShort = v * 0.65; P.env.relSched = v * 0.8; }
+    }));
+    inner.appendChild(envRow);
+
+    // ── Synth logo watermark (bottom-right) ──
+    var logo = document.createElement('div');
+    logo.className = 'synth-logo';
+    logo.textContent = ui.icon;
+    logo.style.color = ui.accent;
+    inner.appendChild(logo);
+
+    body.appendChild(inner);
+  }
+
+  // ═══ Global drag handlers for rack + synth editor ═══
+  document.addEventListener('mousemove', function (e) {
+    if (synthRackDragging && synthRackEl) {
+      var x = Math.max(0, Math.min(window.innerWidth - 60, e.clientX - synthRackDragX));
+      var y = Math.max(0, Math.min(window.innerHeight - 20, e.clientY - synthRackDragY));
+      synthRackEl.style.left = x + 'px';
+      synthRackEl.style.top = y + 'px';
+    }
+    if (synthEditorDragging && synthEditorEl) {
+      var ex = Math.max(0, Math.min(window.innerWidth - 60, e.clientX - synthEditorDragX));
+      var ey = Math.max(0, Math.min(window.innerHeight - 20, e.clientY - synthEditorDragY));
+      synthEditorEl.style.left = ex + 'px';
+      synthEditorEl.style.top = ey + 'px';
+    }
+  });
+  document.addEventListener('mouseup', function () {
+    if (synthRackDragging) {
+      document.body.classList.remove('w95-dragging');
+      synthRackDragging = false;
+    }
+    if (synthEditorDragging) {
+      document.body.classList.remove('w95-dragging');
+      synthEditorDragging = false;
+    }
+  });
+
+  createSynthRack();
+
   // Mode HUD: intentional, legible, minimal
   let hudEl = null;
   let hudStatusEl = null;
@@ -6659,17 +8114,39 @@ import { initMidiPlayer } from './midi-player.js';
         ];
       } },
       { html: '<span class="hud-accel">S</span>ynth', getItems: function () {
-        return [
-          { label: 'Microphone', shortcut: '1', checked: micEnabled, action: function () { toggleMic(); } },
-          { label: 'Arpeggiator', shortcut: '2', checked: arpEnabled, action: function () { toggleArp(); } },
-          { label: 'Gyroscope', shortcut: '3', checked: gyroEnabled, action: function () { initGyro(); } },
-          { label: 'Ambient', shortcut: '4', checked: ambientMode, action: function () { ambientMode ? stopAmbient() : startAmbient(); } },
-          '---',
-          { label: 'Harmony: ' + HARMONY_MODE_LABEL[getHarmonyMode()], shortcut: '6', action: function () {
-            var hm = cycleHarmonyMode();
-            showModeToast('Harmony ' + HARMONY_MODE_LABEL[hm]);
-          } }
+        var items = [
+          { label: 'Instruments\u2026', action: function () {
+            if (!synthRackEl) createSynthRack();
+            if (synthRackEl.style.display === 'none') {
+              synthRackEl.style.display = '';
+              synthRackMinimized = false;
+              var b = synthRackEl.querySelector('.w95-window-body');
+              if (b) b.style.display = '';
+            }
+            bringToFront(synthRackEl);
+          } },
+          '---'
         ];
+        SYNTH_PRESETS.forEach(function (preset, i) {
+          items.push({
+            label: preset.ui.icon + ' ' + preset.name,
+            checked: i === currentSynthIdx,
+            action: (function (ii) { return function () {
+              selectSynthInRack(ii);
+            }; })(i)
+          });
+        });
+        items.push('---');
+        items.push({ label: 'Microphone', shortcut: '1', checked: micEnabled, action: function () { toggleMic(); } });
+        items.push({ label: 'Arpeggiator', shortcut: '2', checked: arpEnabled, action: function () { toggleArp(); } });
+        items.push({ label: 'Gyroscope', shortcut: '3', checked: gyroEnabled, action: function () { initGyro(); } });
+        items.push({ label: 'Ambient', shortcut: '4', checked: ambientMode, action: function () { ambientMode ? stopAmbient() : startAmbient(); } });
+        items.push('---');
+        items.push({ label: 'Harmony: ' + HARMONY_MODE_LABEL[getHarmonyMode()], shortcut: '6', action: function () {
+          var hm = cycleHarmonyMode();
+          showModeToast('Harmony ' + HARMONY_MODE_LABEL[hm]);
+        } });
+        return items;
       } },
       { html: 'F<span class="hud-accel">X</span>', getItems: function () {
         return [
@@ -6894,6 +8371,14 @@ import { initMidiPlayer } from './midi-player.js';
       return;
     }
 
+    // Synth preset cycle (0)
+    if (key === 'Digit0') {
+      e.preventDefault();
+      currentSynthIdx = (currentSynthIdx + 1) % SYNTH_PRESETS.length;
+      showModeToast('Synth: ' + SYNTH_PRESETS[currentSynthIdx].name);
+      refreshSynthRack();
+      return;
+    }
     // Visual freeze (5)
     if (key === 'Digit5') {
       e.preventDefault();
@@ -7083,7 +8568,7 @@ import { initMidiPlayer } from './midi-player.js';
           padding: 0;
           border-radius: 0;
           font: 860 140px/1.0 "Lucida Console","Courier New","Tahoma","MS Sans Serif",monospace;
-          letter-spacing: -0.06em;
+          letter-spacing: -0.10em;
           flex: 0 0 18%;
           justify-content: center;
           background: transparent;
@@ -7111,7 +8596,7 @@ import { initMidiPlayer } from './midi-player.js';
           position: relative;
           display: inline-grid;
           place-items: center;
-          min-width: 2.2em;
+          min-width: 1.6em;
           line-height: 1;
         }
         .note-head-code .glyph-main {
@@ -7124,7 +8609,7 @@ import { initMidiPlayer } from './midi-player.js';
           position: absolute;
           inset: 0 0 0 0;
           color: rgba(255,76,122,0.34);
-          transform: translate(2.8px, -0.5px);
+          transform: translate(0.7px, -0.15px);
           pointer-events: none;
           mix-blend-mode: screen;
         }
@@ -7132,7 +8617,7 @@ import { initMidiPlayer } from './midi-player.js';
           position: absolute;
           inset: 0 0 0 0;
           color: rgba(74,235,255,0.32);
-          transform: translate(-2.8px, 0.5px);
+          transform: translate(-0.7px, 0.15px);
           pointer-events: none;
           mix-blend-mode: screen;
         }
@@ -7194,7 +8679,7 @@ import { initMidiPlayer } from './midi-player.js';
       'transition:opacity 120ms ease-out'
     ].join(';');
     const rows = [
-      { top: '72%', left: '3%', right: '30%', alpha: 0.98, blur: 0, kind: 'top' },
+      { top: '58%', left: '3%', right: '30%', alpha: 0.98, blur: 0, kind: 'top' },
       { top: '30%', left: '70%', right: '2.5%', alpha: 0.72, blur: 0.22, kind: 'right' },
       { top: '67%', left: '2.5%', right: '70%', alpha: 0.68, blur: 0.18, kind: 'left' },
       { top: '88%', left: '4%', right: '4%', alpha: 0.56, blur: 0.32, kind: 'bottom' }

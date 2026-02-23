@@ -145,7 +145,7 @@ html, body {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 1450;
+  z-index: 2500;
   pointer-events: none;
   display: flex;
   align-items: stretch;
@@ -199,10 +199,10 @@ html, body {
 .w95-window {
   position: fixed;
   left: 12px;
-  top: 50%;
+  top: 32%;
   transform: translateY(-50%);
   width: 240px;
-  z-index: 1200;
+  z-index: 1500;
   background: #c0c0c0;
   border: 2px solid #000;
   box-shadow:
@@ -215,6 +215,8 @@ html, body {
   color: #000;
   -webkit-user-select: none;
   user-select: none;
+  display: flex;
+  flex-direction: column;
 }
 .w95-titlebar {
   display: flex;
@@ -282,12 +284,12 @@ html, body {
   box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #dfdfdf;
   margin: 4px;
   padding: 4px;
-  min-height: 100px;
-  max-height: 240px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  min-height: 60px;
+  flex: 1;
+  overflow: auto;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  align-content: start;
   gap: 2px;
   scrollbar-width: thin;
 }
@@ -374,7 +376,14 @@ html, body {
   outline: 2px dashed #000080;
   outline-offset: -3px;
 }
-.w95-window-body { /* collapsible wrapper */ }
+.w95-window-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
 
 /* ── Win95 Dropdown Menu ── */
 .w95-dropdown {
@@ -421,38 +430,31 @@ html, body {
   box-shadow: 0 1px 0 #fff;
 }
 
-/* ── Win95 Resize Handle ── */
+/* ── Win95 Resize Handle ── on the outer .w95-window */
 .w95-resize-handle {
   position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 14px;
-  height: 14px;
+  right: 2px;
+  bottom: 2px;
+  width: 12px;
+  height: 12px;
   cursor: se-resize;
-  /* Win95 grip pattern: diagonal dots */
-  background:
-    linear-gradient(135deg,
-      transparent 30%,
-      #fff 30%, #fff 35%,
-      transparent 35%, transparent 45%,
-      #fff 45%, #fff 50%,
-      transparent 50%, transparent 60%,
-      #fff 60%, #fff 65%,
-      transparent 65%, transparent 75%,
-      #fff 75%, #fff 80%,
-      transparent 80%),
-    linear-gradient(135deg,
-      transparent 32%,
-      #808080 32%, #808080 37%,
-      transparent 37%, transparent 47%,
-      #808080 47%, #808080 52%,
-      transparent 52%, transparent 62%,
-      #808080 62%, #808080 67%,
-      transparent 67%, transparent 77%,
-      #808080 77%, #808080 82%,
-      transparent 82%);
   z-index: 2;
+  /* Win95 grip dots */
+  background-image:
+    radial-gradient(circle, #fff 1px, transparent 1px),
+    radial-gradient(circle, #808080 1px, transparent 1px);
+  background-size: 4px 4px;
+  background-position: 1px 1px, 2px 2px;
 }
+/* Prevent text selection during drag/resize */
+body.w95-dragging,
+body.w95-resizing {
+  cursor: default !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+body.w95-resizing { cursor: se-resize !important; }
+body.w95-dragging { cursor: default !important; }
 
 /* ── Win95 File List scrollbars (both axes) ── */
 .w95-filelist {
@@ -1611,3 +1613,341 @@ html, body {
 .y2k-gradient-wrap { transition: opacity 120ms ease-out; }
 .y2k-dots-wrap { transition: opacity 100ms ease-out; }
 .y2k-edge-wrap { transition: opacity 120ms ease-out; }
+
+/* ════════════════════════════════════════════════════
+   Synth Rack + Editor — Win95 + Analog Hardware
+   ════════════════════════════════════════════════════ */
+
+/* ── Instruments Rack ── */
+#synth-rack-window {
+  position: fixed !important;
+}
+.synth-rack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  background: #fff;
+  border: 2px inset #808080;
+  min-height: 0;
+  overflow-y: auto;
+  max-height: 220px;
+}
+.synth-rack-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 22px;
+  padding: 0 4px;
+  cursor: pointer;
+  gap: 5px;
+  -webkit-user-select: none;
+  user-select: none;
+  font: 400 11px/22px "Tahoma", "MS Sans Serif", sans-serif;
+  color: #000;
+}
+.synth-rack-row:hover { background: #1084d0; color: #fff; }
+.synth-rack-row.active { background: #000080; color: #fff; }
+.synth-rack-light {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  opacity: 0.35;
+  border: 1px solid #808080;
+}
+.synth-rack-light.on {
+  opacity: 1;
+  box-shadow: 0 0 3px 1px currentColor;
+}
+.synth-rack-icon {
+  font-size: 11px;
+  line-height: 1;
+  width: 14px;
+  text-align: center;
+}
+.synth-rack-row.active .synth-rack-icon,
+.synth-rack-row:hover .synth-rack-icon { color: #fff; }
+.synth-rack-name {
+  font: inherit;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.synth-rack-open-btn {
+  width: 16px; height: 15px;
+  font-size: 8px;
+  line-height: 15px;
+  background: #c0c0c0;
+  border: 1.5px outset #dfdfdf;
+  cursor: pointer;
+  padding: 0;
+  text-align: center;
+  color: #000;
+}
+.synth-rack-open-btn:active { border-style: inset; }
+#synth-rack-status {
+  font: 400 10px/18px "Tahoma", "MS Sans Serif", sans-serif;
+  padding: 0 4px;
+  color: #000;
+}
+
+/* ── Synth Editor Window ── */
+.synth-window {
+  width: 272px;
+}
+.synth-window > .w95-titlebar {
+  font: bold 11px/20px "Tahoma", "MS Sans Serif", sans-serif;
+}
+.synth-window .w95-titlebar-icon {
+  font-size: 11px;
+  margin-right: 3px;
+}
+.synth-window-body {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: #c0c0c0;
+  overflow: hidden;
+}
+.synth-editor-inner {
+  padding: 4px 5px 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: relative;
+}
+.synth-logo {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 36px;
+  line-height: 1;
+  opacity: 0.25;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+  text-shadow: 0 0 8px currentColor;
+}
+.synth-window.minimized > .synth-window-body { display: none; }
+
+/* ── Section Divider — Win95 etched rule ── */
+.synth-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 1px 0 0;
+  height: 10px;
+}
+.synth-section-divider::before,
+.synth-section-divider::after {
+  content: '';
+  flex: 1;
+  height: 0;
+  border-top: 1px solid #808080;
+  border-bottom: 1px solid #fff;
+}
+.synth-section-label {
+  font: bold 7px/1 "Tahoma", "Arial", sans-serif;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  flex-shrink: 0;
+}
+.synth-group-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ── Knob — SVG rotary (matches EQ mixer) ── */
+.synth-knob-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  width: 42px;
+  cursor: default;
+}
+.synth-knob-value {
+  font: 500 8px/1 "Tahoma", "Arial", sans-serif;
+  color: #000;
+  text-align: center;
+  min-width: 32px; height: 10px;
+}
+.synth-knob-label {
+  font: 400 7px/1 "Tahoma", "Arial", sans-serif;
+  color: #444;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 42px;
+}
+
+/* ── Fader (kept for future use) ── */
+.synth-fader-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 28px;
+  cursor: default;
+}
+.synth-fader-label {
+  font: 400 7px/1 "Tahoma", "Arial", sans-serif;
+  color: #444;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-align: center;
+  white-space: nowrap;
+}
+.synth-fader-track {
+  width: 5px;
+  background: #1a1a24;
+  border: 2px inset #808080;
+  position: relative;
+  cursor: pointer;
+}
+.synth-fader-fill {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: linear-gradient(to top, var(--fader-accent, var(--synth-accent, #4080c0)), transparent);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.synth-fader-thumb {
+  position: absolute;
+  left: -8px;
+  width: 21px; height: 7px;
+  background: linear-gradient(to bottom, #e0e0e0 0%, #c0c0c0 40%, #909090 60%, #b0b0b0 100%);
+  border: 1px outset #dfdfdf;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  pointer-events: none;
+}
+.synth-fader-thumb::before {
+  content: '';
+  position: absolute;
+  top: 2px; left: 5px; right: 5px;
+  height: 1px;
+  background: rgba(0,0,0,0.12);
+  box-shadow: 0 2px 0 rgba(0,0,0,0.08);
+}
+.synth-fader-value {
+  font: 500 8px/1 "Tahoma", "Arial", sans-serif;
+  color: #000;
+  text-align: center;
+}
+
+/* ── Cycle Button — Win95 beveled ── */
+.synth-cycle-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  width: 52px;
+}
+.synth-cycle-btn {
+  width: 52px; height: 18px;
+  background: #c0c0c0;
+  border: 2px outset #dfdfdf;
+  font: 500 8px/14px "Tahoma", "Arial", sans-serif;
+  color: #000;
+  cursor: pointer;
+  text-align: center; padding: 0 3px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.synth-cycle-btn:hover { background: #d0d0d0; }
+.synth-cycle-btn:active { border-style: inset; background: #b0b0b0; }
+.synth-cycle-label {
+  font: 400 7px/1 "Tahoma", "Arial", sans-serif;
+  color: #444;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ── Waveform Canvas — recessed LCD ── */
+.synth-waveform-canvas {
+  display: block;
+  background: #0a0a1a;
+  border: 2px inset #808080;
+  flex-shrink: 0;
+}
+
+/* ── Live Oscilloscope — recessed LCD strip ── */
+.synth-oscilloscope {
+  width: 100%; height: 68px;
+  display: block;
+  background: #0a0a18;
+  border: 2px inset #808080;
+}
+
+/* ── Preset Selector — Win95 button bar ── */
+.synth-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 0;
+  flex-wrap: wrap;
+}
+.synth-preset-btn {
+  height: 18px;
+  padding: 0 5px;
+  background: #c0c0c0;
+  border: 2px outset #dfdfdf;
+  font: 500 8px/14px "Tahoma", "Arial", sans-serif;
+  color: #000;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.synth-preset-btn:hover { background: #d0d0d0; }
+.synth-preset-btn:active,
+.synth-preset-btn.active {
+  border-style: inset;
+  background: #b0b0b0;
+}
+
+/* ── OSC two-row layout ── */
+.synth-osc-section {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+.synth-osc-controls {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  justify-content: center;
+}
+.synth-osc-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  justify-content: center;
+}
+.synth-osc-label {
+  font: bold 9px/1 "Tahoma", "Arial", sans-serif;
+  color: #555;
+  width: 11px;
+  text-align: center;
+  flex-shrink: 0;
+}
+/* ── Synth Tooltip — Win95 help popup ── */
+#synth-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 220px;
+  padding: 4px 6px;
+  background: #ffffcc;
+  border: 1px solid #000;
+  font: 400 11px/15px "Tahoma", "MS Sans Serif", sans-serif;
+  color: #000;
+  pointer-events: none;
+  white-space: pre-line;
+  display: none;
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.15);
+}
