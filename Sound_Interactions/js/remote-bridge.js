@@ -273,14 +273,13 @@
     var roomRow = el('div', 'sonic-admin-room');
     roomRow.id = 'sonic-admin-room';
     roomRow.style.cssText = 'display:flex;gap:10px;align-items:flex-start;margin-bottom:8px;';
-    // QR canvas
+    // QR image
     var qrWrap = el('div');
     qrWrap.style.cssText = 'flex-shrink:0;';
-    var qrCanvas = document.createElement('canvas');
-    qrCanvas.id = 'sonic-admin-qr';
-    qrCanvas.width = 128; qrCanvas.height = 128;
-    qrCanvas.style.cssText = 'width:128px;height:128px;border:1px solid #808080;background:#fff;';
-    qrWrap.appendChild(qrCanvas);
+    var qrImg = document.createElement('img');
+    qrImg.id = 'sonic-admin-qr';
+    qrImg.style.cssText = 'width:128px;height:128px;border:1px solid #808080;background:#fff;display:block;';
+    qrWrap.appendChild(qrImg);
     roomRow.appendChild(qrWrap);
     // Room details
     var roomDetails = el('div');
@@ -344,15 +343,19 @@
       details.innerHTML = '<strong>Room:</strong> ' + roomId +
         '<br><span style="font-size:9px;color:#606060;">' + joinUrl + '</span>';
       // Generate QR
-      var qrCanvas = document.getElementById('sonic-admin-qr');
-      if (qrCanvas && typeof QRCode !== 'undefined') {
+      var qrImg = document.getElementById('sonic-admin-qr');
+      if (qrImg && typeof QRCode !== 'undefined') {
         console.log('[Sonic Remote] Generating QR for:', joinUrl);
-        QRCode.toCanvas(qrCanvas, joinUrl, {
-          width: 128, margin: 1,
+        QRCode.toDataURL(joinUrl, {
+          width: 256, margin: 1,
           color: { dark: '#000080', light: '#ffffff' }
-        }, function (err) {
-          if (err) console.error('[Sonic Remote] QR error:', err);
-          else console.log('[Sonic Remote] QR generated');
+        }, function (err, url) {
+          if (err) {
+            console.error('[Sonic Remote] QR error:', err);
+          } else {
+            console.log('[Sonic Remote] QR generated OK');
+            qrImg.src = url;
+          }
         });
       } else {
         console.warn('[Sonic Remote] QRCode lib not available:', typeof QRCode);
