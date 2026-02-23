@@ -4842,6 +4842,7 @@ import { initMidiPlayer } from './midi-player.js';
     currentKeyScale = scale === 'minor' ? 'minor' : 'major';
     rebuildKeyMapping();
     const label = KEY_ROOT_NAMES[currentKeyRoot] + ' ' + (currentKeyScale === 'minor' ? 'min' : 'Maj');
+    console.log('[Sonic Key] setKeySignature → ' + label + ' | KEY_TO_NOTE.KeyZ=' + KEY_TO_NOTE.KeyZ + ' KeyQ=' + KEY_TO_NOTE.KeyQ);
     showModeToast('Key: ' + label);
     if (window.__sonicRemoteBridge && window.__sonicRemoteBridge.broadcastKeySignature) {
       window.__sonicRemoteBridge.broadcastKeySignature(currentKeyRoot, currentKeyScale, label);

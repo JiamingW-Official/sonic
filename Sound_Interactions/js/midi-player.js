@@ -2689,17 +2689,21 @@ export function initMidiPlayer(api) {
     detectedKeyRoot = 0;
     detectedKeyScale = 'major';
     let headerHasKey = false;
-    if (parsedMidi && parsedMidi.header && parsedMidi.header.keySignatures && parsedMidi.header.keySignatures.length > 0) {
-      const ks = parsedMidi.header.keySignatures[0];
-      // Skip if key=0 and scale=major (often just the default, not an actual annotation)
-      if (ks.key !== 0 || ks.scale === 'minor') {
-        const majorRoot = KEYSIG_TO_MAJOR_ROOT[String(ks.key)];
-        detectedKeyRoot = majorRoot != null ? majorRoot : 0;
-        detectedKeyScale = ks.scale === 'minor' ? 'minor' : 'major';
-        if (detectedKeyScale === 'minor') {
-          detectedKeyRoot = (detectedKeyRoot - 3 + 12) % 12;
+    if (parsedMidi && parsedMidi.header) {
+      const ksArr = parsedMidi.header.keySignatures;
+      console.log('[Sonic Key] MIDI header keySignatures:', ksArr);
+      if (ksArr && ksArr.length > 0) {
+        const ks = ksArr[0];
+        if (ks.key !== 0 || ks.scale === 'minor') {
+          const majorRoot = KEYSIG_TO_MAJOR_ROOT[String(ks.key)];
+          detectedKeyRoot = majorRoot != null ? majorRoot : 0;
+          detectedKeyScale = ks.scale === 'minor' ? 'minor' : 'major';
+          if (detectedKeyScale === 'minor') {
+            detectedKeyRoot = (detectedKeyRoot - 3 + 12) % 12;
+          }
+          headerHasKey = true;
+          console.log('[Sonic Key] From header: root=' + detectedKeyRoot + ' scale=' + detectedKeyScale);
         }
-        headerHasKey = true;
       }
     }
     // Fallback: analyze pitch class distribution (Krumhansl-Kessler algorithm)
@@ -2707,11 +2711,16 @@ export function initMidiPlayer(api) {
       const detected = detectKeyFromNotes(parsedMidi);
       detectedKeyRoot = detected.root;
       detectedKeyScale = detected.scale;
+      console.log('[Sonic Key] From note analysis: root=' + detectedKeyRoot + ' scale=' + detectedKeyScale);
     }
     // Apply key signature (combined with current transpose)
+    const KEY_NAMES_LOG = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+    const effectiveRoot = (detectedKeyRoot + (currentTranspose % 12) + 12) % 12;
+    console.log('[Sonic Key] Applying: ' + KEY_NAMES_LOG[effectiveRoot] + ' ' + detectedKeyScale + ' (transpose=' + currentTranspose + ')');
     if (window.__sonicRemoteAPI && window.__sonicRemoteAPI.setKeySignature) {
-      const effectiveRoot = (detectedKeyRoot + (currentTranspose % 12) + 12) % 12;
       window.__sonicRemoteAPI.setKeySignature(effectiveRoot, detectedKeyScale);
+    } else {
+      console.warn('[Sonic Key] window.__sonicRemoteAPI.setKeySignature not available!');
     }
 
     trackList.innerHTML = '';
