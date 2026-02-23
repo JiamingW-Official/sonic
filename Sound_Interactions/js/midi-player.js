@@ -1566,6 +1566,10 @@ export function initMidiPlayer(api) {
     if (!mixerPanel) createMixerPanel();
     mixerChannelsEl.innerHTML = '';
     mixerTrackData = [];
+    // Reset audio engine mixer state (volumes, pans, effects) — keep synth selection
+    if (window.__sonicRemoteAPI && typeof window.__sonicRemoteAPI.resetAllMixerState === 'function') {
+      window.__sonicRemoteAPI.resetAllMixerState();
+    }
     if (!parsedMidi || !parsedMidi.tracks) {
       mixerPanel.style.display = 'none';
       return;
@@ -2660,6 +2664,10 @@ export function initMidiPlayer(api) {
     showProgressBar(!!parsedMidi);
     rebuildMixer();
     emitTransport();
+    // Broadcast fresh state to all connected mobile clients
+    if (window.__sonicRemoteBridge && typeof window.__sonicRemoteBridge.sendStateSync === 'function') {
+      setTimeout(function () { window.__sonicRemoteBridge.sendStateSync(); }, 100);
+    }
   }
 
   const fileInput = document.getElementById('midi-file-input');

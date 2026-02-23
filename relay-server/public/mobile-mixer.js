@@ -20,7 +20,7 @@
     channelEls = [];
     if (state && state.mixer) tracks = state.mixer.tracks || [];
     if (!tracks.length) {
-      container.textContent = '等待 MIDI 文件加载...';
+      container.textContent = 'Waiting for MIDI file...';
       container.style.cssText = 'display:flex;align-items:center;justify-content:center;color:#808080;';
       return;
     }
@@ -28,7 +28,7 @@
 
     var label = document.createElement('div');
     label.style.cssText = 'font:bold 10px Tahoma,sans-serif;color:#404040;padding:4px 8px;';
-    label.textContent = '混音台 — ' + tracks.length + ' 轨道';
+    label.textContent = 'Mixer \u2014 ' + tracks.length + ' tracks';
     container.appendChild(label);
 
     var row = document.createElement('div');

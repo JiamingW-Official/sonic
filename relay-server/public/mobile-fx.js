@@ -139,7 +139,7 @@
     }
 
     if (!tracks.length) {
-      container.textContent = '等待 MIDI 文件加载...';
+      container.textContent = 'Waiting for MIDI file...';
       container.style.cssText = 'display:flex;align-items:center;justify-content:center;color:#808080;';
       return;
     }
@@ -148,7 +148,7 @@
     // Track select buttons
     var trackLabel = document.createElement('div');
     trackLabel.style.cssText = 'font:bold 10px Tahoma,sans-serif;color:#404040;padding:4px 0;';
-    trackLabel.textContent = '选择轨道:';
+    trackLabel.textContent = 'Select Track:';
     container.appendChild(trackLabel);
 
     var trackRow = document.createElement('div');
@@ -257,7 +257,7 @@
         presetRow.style.cssText = 'margin-bottom:6px;';
         var presetLabel = document.createElement('span');
         presetLabel.style.cssText = 'font-size:10px;color:#404040;margin-right:4px;';
-        presetLabel.textContent = '预设:';
+        presetLabel.textContent = 'Preset:';
         presetRow.appendChild(presetLabel);
 
         var presetSelect = document.createElement('select');

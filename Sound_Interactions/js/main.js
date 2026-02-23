@@ -10823,6 +10823,39 @@ import { initMidiPlayer } from './midi-player.js';
         updateEffectParams(effectName, chain[effectName].nodes, chain[effectName].params);
       }
     },
-    initAudio: function () { initAudio(); }
+    initAudio: function () { initAudio(); },
+    // Reset all mixer nodes + effect chains (called on new MIDI load)
+    resetAllMixerState: function () {
+      // Reset regular track mixer nodes
+      trackMixerNodes.forEach(function (node) {
+        node.volume = 1.0;
+        node.panValue = 0;
+        if (node.gain) { try { node.gain.gain.value = 1.0; } catch (e) {} }
+        if (node.pan)  { try { node.pan.pan.value = 0; } catch (e) {} }
+      });
+      // Reset drum track mixer nodes
+      drumTrackMixerNodes.forEach(function (node) {
+        node.volume = 1.0;
+        node.panValue = 0;
+        if (node.gain) { try { node.gain.gain.value = 1.0; } catch (e) {} }
+        if (node.pan)  { try { node.pan.pan.value = 0; } catch (e) {} }
+      });
+      // Destroy all active effect nodes and reset chains
+      trackEffectChains.forEach(function (chain, key) {
+        var FX = ['eq', 'phaser', 'reverb', 'delay', 'chorus', 'distortion'];
+        for (var i = 0; i < FX.length; i++) {
+          var fx = chain[FX[i]];
+          if (fx && fx.nodes) {
+            destroyEffectNodes(FX[i], fx.nodes);
+            fx.nodes = null;
+          }
+          if (fx) fx.enabled = false;
+        }
+      });
+      // Clear effect chains for per-track (keep 'main' chain reset)
+      var mainChain = trackEffectChains.get('main');
+      trackEffectChains.clear();
+      if (mainChain) trackEffectChains.set('main', mainChain);
+    }
   };
 })();

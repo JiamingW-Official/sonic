@@ -172,7 +172,7 @@
     listBox.className = 'w95-groupbox';
     var listLabel = document.createElement('div');
     listLabel.className = 'w95-groupbox-label';
-    listLabel.textContent = '合成器';
+    listLabel.textContent = 'Synthesizer';
     listBox.appendChild(listLabel);
 
     var list = document.createElement('ul');
@@ -208,7 +208,7 @@
     varBox.id = 'var-box';
     var varLabel = document.createElement('div');
     varLabel.className = 'w95-groupbox-label';
-    varLabel.textContent = '变体';
+    varLabel.textContent = 'Variations';
     varBox.appendChild(varLabel);
     var varRow = document.createElement('div');
     varRow.className = 'var-btn-row';

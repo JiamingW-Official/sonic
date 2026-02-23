@@ -1,5 +1,9 @@
-/* Sonic Mobile — Win95 Style for Touch Devices */
+/* ═══════════════════════════════════════════════
+   Sonic Mobile — Premium Win95 Style
+   ═══════════════════════════════════════════════ */
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
+
 html, body {
   height: 100%; overflow: hidden;
   font: 11px Tahoma, 'MS Sans Serif', Arial, sans-serif;
@@ -8,287 +12,596 @@ html, body {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
-/* Win95 window */
+
+/* ── Win95 Window ── */
 .w95-window {
   background: #c0c0c0;
   border: 2px solid #000;
-  box-shadow: inset -1px -1px 0 #808080, inset 1px 1px 0 #fff, inset -2px -2px 0 #404040, inset 2px 2px 0 #dfdfdf;
-  display: flex; flex-direction: column;
+  box-shadow:
+    inset -1px -1px 0 #808080,
+    inset 1px 1px 0 #fff,
+    inset -2px -2px 0 #404040,
+    inset 2px 2px 0 #dfdfdf;
+  display: flex;
+  flex-direction: column;
 }
+
 .w95-titlebar {
   background: linear-gradient(90deg, #000080 0%, #1084d0 100%);
-  color: #fff; font-weight: bold;
-  padding: 2px 4px; display: flex; align-items: center; gap: 4px;
-  user-select: none; -webkit-user-select: none;
-  min-height: 22px;
+  color: #fff;
+  font-weight: bold;
+  padding: 3px 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+  -webkit-user-select: none;
+  min-height: 24px;
 }
-.w95-titlebar-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+
+.w95-titlebar-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+.w95-titlebar-buttons {
+  display: flex;
+  gap: 2px;
+}
+
 .w95-titlebar-btn {
-  width: 18px; height: 16px; background: #c0c0c0; border: 2px outset #ddd;
-  font: bold 11px/14px Tahoma, sans-serif; text-align: center; cursor: pointer;
-  display: flex; align-items: center; justify-content: center; padding: 0;
+  width: 18px;
+  height: 16px;
+  background: #c0c0c0;
+  border: 2px outset #ddd;
+  font: bold 11px/14px Tahoma, sans-serif;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 .w95-titlebar-btn:active { border-style: inset; }
+
 .w95-window-body {
-  flex: 1; overflow-y: auto; overflow-x: hidden;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px;
-  -webkit-overflow-scrolling: touch;
 }
-/* Group box */
+
+/* ── Group Box ── */
 .w95-groupbox {
   border: 1px solid #808080;
   box-shadow: 1px 1px 0 #fff;
-  padding: 10px 8px 6px;
+  padding: 12px 8px 8px;
   margin-bottom: 8px;
   position: relative;
 }
 .w95-groupbox-label {
-  position: absolute; top: -7px; left: 8px;
-  background: #c0c0c0; padding: 0 4px;
-  font: bold 10px Tahoma, sans-serif; color: #404040;
+  position: absolute;
+  top: -7px;
+  left: 8px;
+  background: #c0c0c0;
+  padding: 0 4px;
+  font: bold 10px Tahoma, sans-serif;
+  color: #404040;
 }
-/* Button */
+
+/* ── Buttons ── */
 .w95-btn {
   background: #c0c0c0;
   border: 2px outset #ddd;
   font: 11px Tahoma, sans-serif;
-  padding: 3px 10px;
+  padding: 4px 12px;
   cursor: pointer;
-  min-height: 28px;
-  min-width: 44px;
+  min-height: 32px;
+  min-width: 48px;
   text-align: center;
 }
 .w95-btn:active { border-style: inset; }
 .w95-btn.active { background: #d4d0c8; border-style: inset; }
 .w95-btn.primary {
-  background: #000080; color: #fff; border-color: #000060;
+  background: linear-gradient(180deg, #0040a0 0%, #000080 100%);
+  color: #fff;
+  border-color: #000060;
+  font-weight: bold;
 }
-/* Input */
+.w95-btn.primary:active {
+  background: #000060;
+  border-style: inset;
+}
+
+/* ── Input ── */
 .w95-input {
-  background: #fff; border: 2px inset #808080;
-  font: 11px Tahoma, sans-serif; padding: 4px 6px;
-  min-height: 28px; width: 100%;
+  background: #fff;
+  border: 2px inset #808080;
+  font: 12px Tahoma, sans-serif;
+  padding: 6px 8px;
+  min-height: 32px;
+  width: 100%;
+  outline: none;
 }
-/* Status bar */
+.w95-input:focus {
+  box-shadow: 0 0 0 1px #000080;
+}
+
+/* ── Status Bar ── */
 .w95-statusbar {
   background: #c0c0c0;
   border-top: 1px solid #808080;
-  padding: 2px 6px;
-  font-size: 10px; color: #404040;
-  display: flex; align-items: center; gap: 4px;
+  box-shadow: inset 0 1px 0 #fff;
+  padding: 3px 8px;
+  font-size: 10px;
+  color: #404040;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-/* ── Mobile-specific layouts ── */
+/* ══════════════════════════════
+   Mobile-specific layouts
+   ══════════════════════════════ */
+
 #app {
-  width: 100vw; height: 100vh;
-  display: flex; flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 #app > .w95-window {
-  width: 100%; height: 100%;
-  border: none; box-shadow: none;
+  width: 100%;
+  height: 100%;
+  border: none;
+  box-shadow: none;
 }
 
-/* Connection screen */
+/* ── Connection Screen ── */
 .connect-screen {
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  gap: 12px; padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px 24px;
   text-align: center;
   height: 100%;
+  background:
+    linear-gradient(180deg, #c0c0c0 0%, #d4d0c8 50%, #c0c0c0 100%);
 }
 .connect-logo {
-  font-size: 28px; font-weight: bold; color: #000080;
-  text-shadow: 1px 1px 0 #fff;
+  font-size: 36px;
+  font-weight: bold;
+  color: #000080;
+  text-shadow: 2px 2px 0 #fff, -1px -1px 0 #808080;
+  letter-spacing: 2px;
+}
+.connect-subtitle {
+  font-size: 10px;
+  color: #606060;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-top: -8px;
 }
 .connect-form {
-  display: flex; flex-direction: column; gap: 8px;
-  width: 100%; max-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 280px;
+}
+.connect-status {
+  font-size: 10px;
+  color: #808080;
+  min-height: 16px;
+  margin-top: 4px;
+  text-align: center;
 }
 
-/* Role selection */
+/* ── Role Selection ── */
+.role-header {
+  font: bold 11px Tahoma, sans-serif;
+  color: #404040;
+  margin-bottom: 4px;
+}
 .role-grid {
-  display: flex; flex-direction: column; gap: 8px;
-  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
 }
 .role-card {
   background: #fff;
   border: 2px solid #808080;
-  box-shadow: inset -1px -1px 0 #404040, inset 1px 1px 0 #dfdfdf;
-  padding: 12px;
-  display: flex; align-items: center; gap: 10px;
+  box-shadow:
+    inset -1px -1px 0 #404040,
+    inset 1px 1px 0 #dfdfdf,
+    2px 2px 4px rgba(0,0,0,0.1);
+  padding: 14px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   cursor: pointer;
-  min-height: 56px;
+  min-height: 60px;
+  transition: background 0.1s;
 }
-.role-card:active { background: #d4d0c8; }
-.role-card.occupied { opacity: 0.5; cursor: default; }
-.role-card.occupied:active { background: #fff; }
-.role-card-icon { font-size: 24px; flex-shrink: 0; }
-.role-card-info { flex: 1; }
-.role-card-name { font-weight: bold; font-size: 12px; }
-.role-card-status { font-size: 10px; color: #808080; margin-top: 2px; }
-.role-card-status.active { color: #008000; }
-
-/* Knob (touch) */
-.mobile-knob-wrap {
-  display: inline-flex; flex-direction: column; align-items: center;
-  width: 64px; margin: 4px;
+.role-card:active {
+  background: #000080;
+  color: #fff;
 }
-.mobile-knob-label {
-  font-size: 9px; color: #404040; margin-bottom: 2px;
-  white-space: nowrap; text-align: center;
+.role-card:active .role-card-status { color: #c0c0e0; }
+.role-card.occupied {
+  opacity: 0.45;
+  cursor: default;
 }
-.mobile-knob-value {
-  font-size: 9px; color: #000; margin-top: 1px;
+.role-card.occupied:active {
+  background: #fff;
+  color: #000;
+}
+.role-card-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+  width: 36px;
   text-align: center;
 }
-.mobile-knob-svg {
-  width: 48px; height: 48px;
-  touch-action: none;
-  cursor: pointer;
+.role-card-info { flex: 1; }
+.role-card-name {
+  font-weight: bold;
+  font-size: 13px;
+}
+.role-card-status {
+  font-size: 10px;
+  color: #808080;
+  margin-top: 2px;
+}
+.role-card-status.active { color: #008000; }
+
+/* ── Toast ── */
+.mobile-toast {
+  text-align: center;
+  color: #808080;
+  font-size: 10px;
+  margin-top: 8px;
+  min-height: 16px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.mobile-toast.visible { opacity: 1; }
+
+/* ── Kick Modal ── */
+.kick-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 24px;
+}
+.kick-dialog {
+  width: 320px;
+  max-width: 90vw;
+  box-shadow:
+    inset -1px -1px 0 #808080,
+    inset 1px 1px 0 #fff,
+    inset -2px -2px 0 #404040,
+    inset 2px 2px 0 #dfdfdf,
+    4px 4px 16px rgba(0,0,0,0.4);
+}
+.kick-dialog-body {
+  padding: 16px;
+}
+.kick-icon-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.kick-icon {
+  font-size: 32px;
+  flex-shrink: 0;
+}
+.kick-msg-col { flex: 1; }
+.kick-title {
+  font-weight: bold;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.kick-subtitle {
+  font-size: 10px;
+  color: #404040;
+  line-height: 1.4;
+}
+.kick-btn-row {
+  display: flex;
+  justify-content: center;
+}
+.kick-ok-btn {
+  min-width: 80px;
 }
 
-/* Fader (touch) */
+/* ══════════════════════════════
+   Touch Controls
+   ══════════════════════════════ */
+
+/* ── SVG Knob ── */
+.mobile-knob-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  width: 64px;
+  margin: 4px;
+}
+.mobile-knob-label {
+  font-size: 9px;
+  color: #404040;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  text-align: center;
+}
+.mobile-knob-value {
+  font-size: 9px;
+  color: #000;
+  margin-top: 1px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.mobile-knob-svg {
+  width: 48px;
+  height: 48px;
+  touch-action: none;
+  cursor: pointer;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.15));
+}
+
+/* ── Fader ── */
 .mobile-fader-wrap {
-  display: flex; flex-direction: column; align-items: center;
-  width: 52px; flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 52px;
+  flex-shrink: 0;
+  padding: 4px;
+  background: #d4d0c8;
+  border: 1px solid #808080;
 }
 .mobile-fader-track {
-  width: 16px; height: 120px;
+  width: 16px;
+  height: 120px;
   background: #fff;
   border: 2px inset #808080;
   position: relative;
   touch-action: none;
 }
 .mobile-fader-fill {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  background: linear-gradient(to top, #008000, #00c000);
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to top, #006000, #00c000, #80ff80);
+  transition: height 0.05s linear;
 }
 .mobile-fader-thumb {
-  position: absolute; left: -4px; right: -4px; height: 8px;
-  background: #c0c0c0;
+  position: absolute;
+  left: -5px;
+  right: -5px;
+  height: 10px;
+  background: linear-gradient(180deg, #e0e0e0, #c0c0c0, #a0a0a0);
   border: 2px outset #ddd;
   cursor: ns-resize;
+  border-radius: 1px;
 }
 .mobile-fader-label {
-  font-size: 9px; color: #404040; margin-top: 2px; text-align: center;
+  font-size: 9px;
+  color: #404040;
+  margin-top: 2px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 48px;
 }
 .mobile-fader-val {
-  font-size: 9px; color: #000; margin-top: 1px; text-align: center;
+  font-size: 9px;
+  color: #000;
+  margin-top: 1px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Mixer channels row (horizontal scroll) */
+/* ── Mixer Channels Row ── */
 .mixer-channels-row {
-  display: flex; gap: 4px; overflow-x: auto;
-  padding: 4px; -webkit-overflow-scrolling: touch;
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 4px;
+  background: #b8b4ac;
+  border: 1px inset #808080;
 }
 
-/* Meter */
+/* ── VU Meter ── */
 .mobile-meter {
-  width: 6px; height: 120px;
-  background: #222;
+  width: 6px;
+  height: 120px;
+  background: #1a1a1a;
   border: 1px inset #808080;
   position: relative;
 }
 .mobile-meter-fill {
-  position: absolute; bottom: 0; left: 0; right: 0;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
   background: linear-gradient(to top, #00c000, #ffff00 70%, #ff0000 95%);
+  transition: height 0.06s linear;
 }
 
-/* Pan slider */
+/* ── Pan Slider ── */
 .mobile-pan {
-  width: 44px; height: 4px;
-  -webkit-appearance: none; appearance: none;
+  width: 44px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
   background: #808080;
   outline: none;
   margin: 4px auto;
+  display: block;
 }
 .mobile-pan::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 12px; height: 12px;
-  background: #c0c0c0; border: 2px outset #ddd;
+  width: 14px;
+  height: 14px;
+  background: linear-gradient(180deg, #e0e0e0, #c0c0c0);
+  border: 2px outset #ddd;
   cursor: pointer;
+  border-radius: 1px;
 }
 
-/* FX slots */
+/* ══════════════════════════════
+   FX Cards
+   ══════════════════════════════ */
+
 .fx-card {
   border: 1px solid #808080;
   box-shadow: 1px 1px 0 #fff;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+  background: #c0c0c0;
 }
 .fx-card-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 4px 6px;
-  background: #d4d0c8; cursor: pointer;
-  font-size: 11px; font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: linear-gradient(180deg, #d8d4cc, #c8c4bc);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+  border-bottom: 1px solid #a0a0a0;
 }
+.fx-card-header:active { background: #c0bca8; }
 .fx-card-toggle {
-  width: 36px; height: 18px;
-  font: bold 10px Tahoma, sans-serif;
-  background: #c0c0c0; border: 2px outset #ddd;
-  cursor: pointer; text-align: center;
+  width: 38px;
+  height: 20px;
+  font: bold 9px Tahoma, sans-serif;
+  background: #c0c0c0;
+  border: 2px outset #ddd;
+  cursor: pointer;
+  text-align: center;
+  line-height: 16px;
 }
-.fx-card-toggle.on { background: #008000; color: #fff; border-color: #004000; }
+.fx-card-toggle.on {
+  background: linear-gradient(180deg, #00a000, #006000);
+  color: #fff;
+  border-color: #004000;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.3);
+}
 .fx-card-body {
-  padding: 6px; display: none;
+  padding: 8px;
+  display: none;
+  background: #d4d0c8;
+  border-top: 1px solid #fff;
 }
 .fx-card.expanded .fx-card-body { display: block; }
 .fx-card-knobs {
-  display: flex; flex-wrap: wrap; justify-content: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
-/* Track select buttons */
+/* ── Track Select Buttons ── */
 .track-btn-row {
-  display: flex; flex-wrap: wrap; gap: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   padding: 4px 0;
 }
 .track-btn {
   font: 10px Tahoma, sans-serif;
   padding: 4px 8px;
-  background: #c0c0c0; border: 2px outset #ddd;
-  cursor: pointer; min-height: 28px;
+  background: #c0c0c0;
+  border: 2px outset #ddd;
+  cursor: pointer;
+  min-height: 28px;
 }
-.track-btn:active, .track-btn.active {
-  border-style: inset; background: #000080; color: #fff;
+.track-btn:active,
+.track-btn.active {
+  border-style: inset;
+  background: #000080;
+  color: #fff;
 }
 
-/* Synth preset list */
-.synth-list { list-style: none; padding: 0; }
+/* ── Synth Preset List ── */
+.synth-list {
+  list-style: none;
+  padding: 0;
+  background: #fff;
+  border: 2px inset #808080;
+  max-height: 200px;
+  overflow-y: auto;
+}
 .synth-list-item {
   padding: 8px 10px;
-  border-bottom: 1px solid #dfdfdf;
-  display: flex; align-items: center; gap: 8px;
-  cursor: pointer; min-height: 36px;
+  border-bottom: 1px solid #e8e8e8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  min-height: 38px;
+  transition: background 0.08s;
 }
+.synth-list-item:last-child { border-bottom: none; }
 .synth-list-item:active { background: #000080; color: #fff; }
-.synth-list-item.selected { background: #000080; color: #fff; }
+.synth-list-item.selected {
+  background: #000080;
+  color: #fff;
+}
 .synth-list-icon { font-size: 16px; }
 .synth-list-name { flex: 1; font-size: 12px; }
 
-/* Variation buttons */
+/* ── Variation Buttons ── */
 .var-btn-row {
-  display: flex; flex-wrap: wrap; gap: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   padding: 4px 0;
 }
 .var-btn {
   font: 10px Tahoma, sans-serif;
   padding: 4px 8px;
-  background: #c0c0c0; border: 2px outset #ddd;
-  cursor: pointer; min-height: 28px;
+  background: #c0c0c0;
+  border: 2px outset #ddd;
+  cursor: pointer;
+  min-height: 28px;
 }
-.var-btn:active, .var-btn.active {
-  border-style: inset; background: #000080; color: #fff;
+.var-btn:active,
+.var-btn.active {
+  border-style: inset;
+  background: #000080;
+  color: #fff;
 }
 
-/* Cycle button */
+/* ── Cycle Button ── */
 .mobile-cycle-btn {
-  min-width: 60px; min-height: 28px;
+  min-width: 60px;
+  min-height: 28px;
   font: 10px Tahoma, sans-serif;
-  background: #c0c0c0; border: 2px outset #ddd;
-  cursor: pointer; text-align: center; padding: 2px 4px;
+  background: #c0c0c0;
+  border: 2px outset #ddd;
+  cursor: pointer;
+  text-align: center;
+  padding: 2px 4px;
 }
 .mobile-cycle-btn:active { border-style: inset; }
 
-/* Exit button */
+/* ── Exit Button ── */
 .exit-btn {
-  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
 }

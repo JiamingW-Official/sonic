@@ -10,7 +10,7 @@
   var username = '';
   var roomId = '';
   var currentSlot = null;
-  var serverState = null; // last state-sync from host
+  var serverState = null;
 
   // Parse room from URL
   var params = new URLSearchParams(window.location.search);
@@ -26,12 +26,18 @@
 
   function clearApp() { app.innerHTML = ''; }
 
+  function escHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
   // ── Screen: Connect ──
   function showConnectScreen() {
     clearApp();
     var win = el('div', 'w95-window');
     var tb = el('div', 'w95-titlebar');
-    tb.innerHTML = '<span>📡</span> <span class="w95-titlebar-text">Sonic Remote</span>';
+    tb.innerHTML = '<span>\uD83D\uDCE1</span> <span class="w95-titlebar-text">Sonic Remote</span>';
     win.appendChild(tb);
 
     var body = el('div', 'w95-window-body');
@@ -39,12 +45,13 @@
 
     var logo = el('div', 'connect-logo', 'Sonic');
     screen.appendChild(logo);
-    screen.appendChild(el('div', '', 'Multi-Device Remote Control'));
+    var subtitle = el('div', 'connect-subtitle', 'Multi-Device Remote Control');
+    screen.appendChild(subtitle);
 
     var form = el('div', 'connect-form');
     var nameInput = el('input', 'w95-input');
     nameInput.type = 'text';
-    nameInput.placeholder = '输入用户名...';
+    nameInput.placeholder = 'Enter username...';
     nameInput.maxLength = 20;
     nameInput.autocomplete = 'off';
     form.appendChild(nameInput);
@@ -57,9 +64,8 @@
       form.appendChild(roomInput);
     }
 
-    var connectBtn = el('button', 'w95-btn primary', '连接');
-    var statusMsg = el('div');
-    statusMsg.style.cssText = 'font-size:10px;color:#808080;min-height:16px;margin-top:4px;';
+    var connectBtn = el('button', 'w95-btn primary', 'Connect');
+    var statusMsg = el('div', 'connect-status');
     form.appendChild(connectBtn);
     form.appendChild(statusMsg);
     screen.appendChild(form);
@@ -67,21 +73,20 @@
     win.appendChild(body);
     app.appendChild(win);
 
-    // Auto-focus
     nameInput.focus();
 
     connectBtn.addEventListener('click', function () {
       var name = nameInput.value.trim();
-      if (!name) { statusMsg.textContent = '请输入用户名'; return; }
+      if (!name) { statusMsg.textContent = 'Please enter a username'; return; }
       var rid = roomId || (roomInput ? roomInput.value.trim() : '');
-      if (!rid) { statusMsg.textContent = '请输入 Room ID'; return; }
+      if (!rid) { statusMsg.textContent = 'Please enter Room ID'; return; }
       username = name;
       roomId = rid;
-      statusMsg.textContent = '正在连接...';
+      statusMsg.textContent = 'Connecting...';
       connectBtn.disabled = true;
       doConnect(function (err) {
         if (err) {
-          statusMsg.textContent = '连接失败: ' + err;
+          statusMsg.textContent = 'Connection failed: ' + err;
           connectBtn.disabled = false;
         }
       });
@@ -103,16 +108,13 @@
 
     socket.on('connect', function () {
       socket.emit('client:join-room', { roomId: roomId, username: username }, function (res) {
-        if (res && res.error) {
-          cb(res.error);
-          return;
-        }
+        if (res && res.error) { cb(res.error); return; }
         showRoleScreen();
       });
     });
 
     socket.on('connect_error', function () {
-      cb('无法连接到服务器');
+      cb('Unable to connect to server');
     });
 
     socket.on('client:room-state', function (data) {
@@ -125,15 +127,12 @@
     });
 
     socket.on('client:slot-denied', function (data) {
-      if (typeof window.__mobileShowToast === 'function')
-        window.__mobileShowToast('槽位已满，排队中 #' + data.queuePos);
+      showToast('Slot full \u2014 queued #' + data.queuePos);
     });
 
-    socket.on('client:kicked', function (data) {
+    socket.on('client:kicked', function () {
       currentSlot = null;
-      showRoleScreen();
-      if (typeof window.__mobileShowToast === 'function')
-        window.__mobileShowToast(data.reason || '已被移出');
+      showKickModal();
     });
 
     socket.on('client:state-sync', function (data) {
@@ -156,9 +155,48 @@
     });
 
     socket.on('disconnect', function () {
-      if (typeof window.__mobileShowToast === 'function')
-        window.__mobileShowToast('连接已断开，重连中...');
+      showToast('Disconnected \u2014 reconnecting...');
     });
+  }
+
+  // ── Kick Modal (Win95 dialog) ──
+  function showKickModal() {
+    // Remove any existing modal
+    var existing = document.getElementById('kick-modal-overlay');
+    if (existing) existing.remove();
+
+    var overlay = el('div', 'kick-overlay');
+    overlay.id = 'kick-modal-overlay';
+
+    var dialog = el('div', 'w95-window kick-dialog');
+
+    var tb = el('div', 'w95-titlebar');
+    tb.innerHTML = '<span class="w95-titlebar-text">\u26A0 Session Ended</span>';
+    dialog.appendChild(tb);
+
+    var body = el('div', 'w95-window-body kick-dialog-body');
+
+    var iconRow = el('div', 'kick-icon-row');
+    var icon = el('div', 'kick-icon', '\u26D4');
+    iconRow.appendChild(icon);
+    var msgCol = el('div', 'kick-msg-col');
+    msgCol.appendChild(el('div', 'kick-title', 'You have been removed'));
+    msgCol.appendChild(el('div', 'kick-subtitle', 'The host has ended your session. You will be returned to the home screen.'));
+    iconRow.appendChild(msgCol);
+    body.appendChild(iconRow);
+
+    var btnRow = el('div', 'kick-btn-row');
+    var okBtn = el('button', 'w95-btn primary kick-ok-btn', 'OK');
+    okBtn.addEventListener('click', function () {
+      overlay.remove();
+      showConnectScreen();
+    });
+    btnRow.appendChild(okBtn);
+    body.appendChild(btnRow);
+
+    dialog.appendChild(body);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
   }
 
   // ── Screen: Role Selection ──
@@ -167,9 +205,10 @@
     clearApp();
     currentSlot = null;
     var win = el('div', 'w95-window');
+
     var tb = el('div', 'w95-titlebar');
-    tb.innerHTML = '<span>📡</span> <span class="w95-titlebar-text">Sonic — ' + escHtml(username) + '</span>';
-    var dcBtn = el('button', 'w95-titlebar-btn', '×');
+    tb.innerHTML = '<span>\uD83D\uDCE1</span> <span class="w95-titlebar-text">Sonic \u2014 ' + escHtml(username) + '</span>';
+    var dcBtn = el('button', 'w95-titlebar-btn', '\u00D7');
     dcBtn.onclick = function () {
       if (socket) { socket.emit('client:leave'); socket.disconnect(); }
       showConnectScreen();
@@ -180,14 +219,16 @@
     win.appendChild(tb);
 
     var body = el('div', 'w95-window-body');
-    body.appendChild(el('div', '', '选择你的角色:'));
     body.style.padding = '12px';
+
+    var header = el('div', 'role-header', 'Select your role:');
+    body.appendChild(header);
 
     var grid = el('div', 'role-grid');
     var slotDefs = [
-      { key: 'instrument', icon: '🎹', label: '乐器', desc: '选择合成器 · 调整音色参数' },
-      { key: 'mixer', icon: '🎚️', label: '混音', desc: '控制每轨音量 · Pan · VU 表' },
-      { key: 'fx', icon: '🎛️', label: '效果器', desc: '选择轨道 · 添加/调整效果' }
+      { key: 'instrument', icon: '\uD83C\uDFB9', label: 'Instrument', desc: 'Select synth \u00B7 Adjust tone params' },
+      { key: 'mixer', icon: '\uD83C\uDF9A\uFE0F', label: 'Mixer', desc: 'Track volume \u00B7 Pan \u00B7 VU meters' },
+      { key: 'fx', icon: '\uD83C\uDF9B\uFE0F', label: 'FX', desc: 'Select track \u00B7 Add/adjust effects' }
     ];
 
     roleScreenSlots = {};
@@ -210,10 +251,9 @@
 
     body.appendChild(grid);
 
-    // Toast area
     var toast = el('div');
     toast.id = 'mobile-toast';
-    toast.style.cssText = 'text-align:center;color:#808080;font-size:10px;margin-top:8px;min-height:16px;';
+    toast.className = 'mobile-toast';
     body.appendChild(toast);
 
     win.appendChild(body);
@@ -227,10 +267,10 @@
 
   function updateRoleScreen(data) {
     if (!roleScreenSlots) return;
-    var slotDefs = {
-      instrument: { desc: '选择合成器 · 调整音色参数' },
-      mixer: { desc: '控制每轨音量 · Pan · VU 表' },
-      fx: { desc: '选择轨道 · 添加/调整效果' }
+    var slotDescs = {
+      instrument: 'Select synth \u00B7 Adjust tone params',
+      mixer: 'Track volume \u00B7 Pan \u00B7 VU meters',
+      fx: 'Select track \u00B7 Add/adjust effects'
     };
     ['instrument', 'mixer', 'fx'].forEach(function (key) {
       var card = roleScreenSlots[key];
@@ -240,13 +280,13 @@
       if (occ) {
         card.classList.add('occupied');
         if (statusEl) {
-          statusEl.textContent = occ.username + ' 使用中';
+          statusEl.textContent = occ.username + ' \u2014 in use';
           statusEl.className = 'role-card-status';
         }
       } else {
         card.classList.remove('occupied');
         if (statusEl) {
-          statusEl.textContent = slotDefs[key].desc;
+          statusEl.textContent = slotDescs[key];
           statusEl.className = 'role-card-status active';
         }
       }
@@ -258,13 +298,16 @@
     clearApp();
     var win = el('div', 'w95-window');
 
-    // Titlebar
-    var slotNames = { instrument: '🎹 乐器控制', mixer: '🎚️ 混音控制', fx: '🎛️ 效果器控制' };
+    var slotNames = {
+      instrument: '\uD83C\uDFB9 Instrument',
+      mixer: '\uD83C\uDF9A\uFE0F Mixer',
+      fx: '\uD83C\uDF9B\uFE0F FX'
+    };
     var tb = el('div', 'w95-titlebar');
     tb.style.position = 'relative';
-    tb.innerHTML = '<span class="w95-titlebar-text">' + (slotNames[slot] || slot) + ' — ' + escHtml(username) + '</span>';
-    var exitBtn = el('button', 'w95-titlebar-btn exit-btn', '←');
-    exitBtn.title = '退出角色';
+    tb.innerHTML = '<span class="w95-titlebar-text">' + (slotNames[slot] || slot) + ' \u2014 ' + escHtml(username) + '</span>';
+    var exitBtn = el('button', 'w95-titlebar-btn exit-btn', '\u2190');
+    exitBtn.title = 'Exit';
     exitBtn.onclick = function () {
       socket.emit('client:release-slot');
       currentSlot = null;
@@ -273,12 +316,10 @@
     tb.appendChild(exitBtn);
     win.appendChild(tb);
 
-    // Body
     var body = el('div', 'w95-window-body');
     body.id = 'control-body';
     win.appendChild(body);
 
-    // Statusbar
     var statusbar = el('div', 'w95-statusbar');
     statusbar.id = 'control-statusbar';
     statusbar.textContent = 'Room: ' + roomId + ' | ' + username;
@@ -286,7 +327,6 @@
 
     app.appendChild(win);
 
-    // Initialize the correct controller
     if (slot === 'instrument' && typeof window.__mobileInitInstrument === 'function') {
       window.__mobileInitInstrument(body, socket, serverState);
     } else if (slot === 'mixer' && typeof window.__mobileInitMixer === 'function') {
@@ -294,22 +334,21 @@
     } else if (slot === 'fx' && typeof window.__mobileInitFx === 'function') {
       window.__mobileInitFx(body, socket, serverState);
     } else {
-      body.textContent = '加载控制界面: ' + slot + '...';
+      body.textContent = 'Loading controller: ' + slot + '...';
     }
   }
 
-  // ── Utilities ──
-  function escHtml(s) {
-    var d = document.createElement('div');
-    d.textContent = s || '';
-    return d.innerHTML;
+  // ── Toast ──
+  function showToast(msg) {
+    var t = document.getElementById('mobile-toast');
+    if (t) {
+      t.textContent = msg;
+      t.classList.add('visible');
+      setTimeout(function () { t.classList.remove('visible'); }, 3000);
+    }
   }
 
-  window.__mobileShowToast = function (msg) {
-    var t = document.getElementById('mobile-toast');
-    if (t) t.textContent = msg;
-  };
-
+  window.__mobileShowToast = showToast;
   window.__mobileGetSocket = function () { return socket; };
   window.__mobileGetState = function () { return serverState; };
 
