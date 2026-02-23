@@ -6207,7 +6207,7 @@ import { initMidiPlayer } from './midi-player.js?v=4';
 
   function playNote(midiNote, sustained, velocity) {
     if (!audioCtx || !masterGain) return null;
-    const voice = createSynthVoice(midiNote, { sustained, velocity: velocity != null ? velocity : 0.8 });
+    const voice = createSynthVoice(midiNote, { sustained, velocity: velocity != null ? velocity : 0.8, snapPitch: false });
     return sustained ? voice : null;
   }
 
