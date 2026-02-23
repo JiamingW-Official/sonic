@@ -7,7 +7,7 @@
 
   // ── Configuration ──
   // Set this to your Render deployment URL (wss:// for production)
-  var RELAY_URL = window.__SONIC_RELAY_URL || 'http://localhost:4000';
+  var RELAY_URL = window.__SONIC_RELAY_URL || 'https://sonic-o6bm.onrender.com';
 
   var socket = null;
   var roomId = null;
