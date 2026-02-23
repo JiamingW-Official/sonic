@@ -10826,6 +10826,13 @@ import { initMidiPlayer } from './midi-player.js';
     initAudio: function () { initAudio(); },
     playDrum: function (type, opts) { initAudio(); playDrum(type, opts); },
     triggerVisualsForDrum: function (drumIndex) { triggerVisualsForDrum(drumIndex); },
+    // Sustained note on (returns voice with .stop)
+    playNoteOn: function (midiNote, velocity) {
+      initAudio();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      return playNote(midiNote, true, velocity != null ? velocity : 0.8);
+    },
+    triggerVisualsForMidi: function (midi) { triggerVisualsForMidi(midi); },
     // Reset all mixer nodes + effect chains (called on new MIDI load)
     resetAllMixerState: function () {
       // Reset regular track mixer nodes

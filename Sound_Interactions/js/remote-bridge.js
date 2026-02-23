@@ -16,7 +16,9 @@
   var _meterInterval = null;
 
   // Slot state mirrors
-  var slots = { instrument: null, mixer: null, fx: null };
+  var slots = { instrument: null, mixer: null, fx: null, drums: null, keys: null };
+  // Remote sustained voices (for keyboard controller)
+  var _remoteVoices = {};
   var queue = [];
 
   // ── Helpers ──
@@ -178,6 +180,16 @@
         api.initAudio();
         if (api.playDrum) api.playDrum(params.drumType, { velocity: params.velocity || 1.0 });
         if (api.triggerVisualsForDrum) api.triggerVisualsForDrum(params.drumIndex || 0);
+        break;
+      case 'keys:noteOn':
+        api.initAudio();
+        var voice = api.playNoteOn ? api.playNoteOn(params.midiNote, params.velocity) : null;
+        if (voice) _remoteVoices[params.midiNote] = voice;
+        if (api.triggerVisualsForMidi) api.triggerVisualsForMidi(params.midiNote);
+        break;
+      case 'keys:noteOff':
+        var rv = _remoteVoices[params.midiNote];
+        if (rv && rv.stop) { rv.stop(); delete _remoteVoices[params.midiNote]; }
         break;
     }
   }
@@ -404,7 +416,8 @@
       { key: 'instrument', label: 'Instrument', icon: '\uD83C\uDFB9', color: '#1084d0' },
       { key: 'mixer', label: 'Mixer', icon: '\uD83C\uDF9A\uFE0F', color: '#40a040' },
       { key: 'fx', label: 'FX', icon: '\uD83C\uDF9B\uFE0F', color: '#d04040' },
-      { key: 'drums', label: 'Drums', icon: '\uD83E\uDD41', color: '#d0a040' }
+      { key: 'drums', label: 'Drums', icon: '\uD83E\uDD41', color: '#d0a040' },
+      { key: 'keys', label: 'Keyboard', icon: '\uD83C\uDFB5', color: '#a040d0' }
     ];
 
     slotDefs.forEach(function (def) {
@@ -458,7 +471,7 @@
         queueDiv.style.color = '#808080';
       } else {
         queueDiv.innerHTML = '';
-        var slotNames = { instrument: 'Instrument', mixer: 'Mixer', fx: 'FX', drums: 'Drums' };
+        var slotNames = { instrument: 'Instrument', mixer: 'Mixer', fx: 'FX', drums: 'Drums', keys: 'Keyboard' };
         queue.forEach(function (q) {
           var qRow = el('div', 'srp-queue-item');
           qRow.textContent = q.username + ' \u2192 ' + (slotNames[q.requestedSlot] || q.requestedSlot);

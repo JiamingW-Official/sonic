@@ -682,3 +682,127 @@ html, body {
   color: #808080;
   margin-top: 2px;
 }
+
+/* ══════════════════════════════
+   Piano Keyboard
+   ══════════════════════════════ */
+
+.keys-octave-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  margin-bottom: 4px;
+}
+
+.keys-oct-label {
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  font: bold 9px Tahoma, sans-serif;
+  color: #404040;
+  background: #d4d0c8;
+  border: 1px solid #808080;
+  box-shadow: inset 1px 1px 0 #fff;
+  padding: 4px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  flex-shrink: 0;
+}
+
+.keys-row {
+  display: flex;
+  flex: 1;
+  gap: 2px;
+}
+
+.keys-black-row {
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 0;
+  height: 55%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.piano-key {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+  transition: transform 0.04s;
+}
+
+.piano-key.white {
+  flex: 1;
+  min-height: 64px;
+  background: linear-gradient(180deg, #f8f8f8 0%, #fff 20%, #e8e8e8 100%);
+  border: 2px outset #ddd;
+  box-shadow:
+    inset -1px -1px 0 #a0a0a0,
+    inset 1px 1px 0 #fff,
+    1px 1px 2px rgba(0,0,0,0.1);
+  padding-bottom: 4px;
+}
+
+.piano-key.white:active,
+.piano-key.white.active {
+  background: linear-gradient(180deg, #d0d0ff 0%, #a0a0e0 100%);
+  border-style: inset;
+  box-shadow:
+    inset 1px 1px 0 #606060,
+    inset -1px -1px 0 #c0c0c0;
+  transform: scale(0.97);
+}
+
+.piano-key.black {
+  position: absolute;
+  width: calc(100% / 7 * 0.65);
+  height: 100%;
+  background: linear-gradient(180deg, #404040 0%, #1a1a1a 60%, #000 100%);
+  border: 2px outset #555;
+  box-shadow:
+    inset -1px -1px 0 #000,
+    inset 1px 1px 0 #606060,
+    2px 2px 4px rgba(0,0,0,0.3);
+  pointer-events: auto;
+  z-index: 3;
+  padding-bottom: 3px;
+}
+
+.piano-key.black:active,
+.piano-key.black.active {
+  background: linear-gradient(180deg, #000080 0%, #0000c0 100%);
+  border-style: inset;
+  box-shadow:
+    inset 1px 1px 0 #000040,
+    inset -1px -1px 0 #4040a0;
+  transform: scaleY(0.96);
+}
+
+.piano-key-name {
+  font: bold 9px Tahoma, sans-serif;
+  text-align: center;
+  pointer-events: none;
+}
+
+.piano-key.white .piano-key-name {
+  color: #606060;
+}
+
+.piano-key.white.active .piano-key-name {
+  color: #000080;
+}
+
+.piano-key.black .piano-key-name {
+  color: #a0a0a0;
+  font-size: 8px;
+}
+
+.piano-key.black.active .piano-key-name {
+  color: #fff;
+}

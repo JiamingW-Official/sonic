@@ -229,7 +229,8 @@
       { key: 'instrument', icon: '\uD83C\uDFB9', label: 'Instrument', desc: 'Select synth \u00B7 Adjust tone params' },
       { key: 'mixer', icon: '\uD83C\uDF9A\uFE0F', label: 'Mixer', desc: 'Track volume \u00B7 Pan \u00B7 VU meters' },
       { key: 'fx', icon: '\uD83C\uDF9B\uFE0F', label: 'FX', desc: 'Select track \u00B7 Add/adjust effects' },
-      { key: 'drums', icon: '\uD83E\uDD41', label: 'Drum Pad', desc: 'Launchpad \u00B7 Tap to trigger drums' }
+      { key: 'drums', icon: '\uD83E\uDD41', label: 'Drum Pad', desc: 'Launchpad \u00B7 Tap to trigger drums' },
+      { key: 'keys', icon: '\uD83C\uDFB5', label: 'Keyboard', desc: '3 octaves \u00B7 Play melodic notes' }
     ];
 
     roleScreenSlots = {};
@@ -272,9 +273,10 @@
       instrument: 'Select synth \u00B7 Adjust tone params',
       mixer: 'Track volume \u00B7 Pan \u00B7 VU meters',
       fx: 'Select track \u00B7 Add/adjust effects',
-      drums: 'Launchpad \u00B7 Tap to trigger drums'
+      drums: 'Launchpad \u00B7 Tap to trigger drums',
+      keys: '3 octaves \u00B7 Play melodic notes'
     };
-    ['instrument', 'mixer', 'fx', 'drums'].forEach(function (key) {
+    ['instrument', 'mixer', 'fx', 'drums', 'keys'].forEach(function (key) {
       var card = roleScreenSlots[key];
       if (!card) return;
       var statusEl = document.getElementById('role-status-' + key);
@@ -304,7 +306,8 @@
       instrument: '\uD83C\uDFB9 Instrument',
       mixer: '\uD83C\uDF9A\uFE0F Mixer',
       fx: '\uD83C\uDF9B\uFE0F FX',
-      drums: '\uD83E\uDD41 Drum Pad'
+      drums: '\uD83E\uDD41 Drum Pad',
+      keys: '\uD83C\uDFB5 Keyboard'
     };
     var tb = el('div', 'w95-titlebar');
     tb.style.position = 'relative';
@@ -338,6 +341,8 @@
       window.__mobileInitFx(body, socket, serverState);
     } else if (slot === 'drums' && typeof window.__mobileInitDrums === 'function') {
       window.__mobileInitDrums(body, socket, serverState);
+    } else if (slot === 'keys' && typeof window.__mobileInitKeys === 'function') {
+      window.__mobileInitKeys(body, socket, serverState);
     } else {
       body.textContent = 'Loading controller: ' + slot + '...';
     }
