@@ -16,6 +16,8 @@ const MIMES = {
   '.svg': 'image/svg+xml',
   '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg',
+  '.mid': 'audio/midi',
+  '.midi': 'audio/midi',
 };
 
 const server = http.createServer((req, res) => {

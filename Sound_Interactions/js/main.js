@@ -6764,124 +6764,129 @@ import { initMidiPlayer } from './midi-player.js';
     if (grip) grip.style.display = midiFolderMinimized ? 'none' : '';
   }
 
+  // Helper: create a file item element for the MIDI folder list
+  function _createMidiFileItem(name, size, onDblClick, onDelete) {
+    var item = document.createElement('div');
+    item.className = 'w95-file-item';
+
+    var iconEl = document.createElement('div');
+    iconEl.className = 'w95-file-icon';
+    iconEl.innerHTML = '<svg viewBox="0 0 32 32" width="32" height="32">' +
+      '<path d="M6 2h14l6 6v20H6z" fill="#fff" stroke="#000" stroke-width="1"/>' +
+      '<path d="M20 2v6h6" fill="#c0c0c0" stroke="#000" stroke-width="1"/>' +
+      '<text x="16" y="23" text-anchor="middle" font-size="14" font-family="serif" fill="#000080">\u266A</text>' +
+      '</svg>';
+
+    var nameEl = document.createElement('div');
+    nameEl.className = 'w95-file-name';
+    nameEl.textContent = name;
+    nameEl.title = name;
+
+    item.appendChild(iconEl);
+    item.appendChild(nameEl);
+
+    // Single click — select
+    item.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var prev = midiFolderList.querySelector('.w95-file-item.selected');
+      if (prev) prev.classList.remove('selected');
+      item.classList.add('selected');
+    });
+
+    // Double click — load into MIDI player
+    item.addEventListener('dblclick', onDblClick);
+
+    // Hover tooltip
+    var tooltipTimer = null;
+    item.addEventListener('mouseenter', function (e) {
+      tooltipTimer = setTimeout(function () {
+        midiFolderTooltip.textContent = name + '\nType: MIDI Audio\nSize: ' + formatFileSize(size);
+        midiFolderTooltip.style.display = 'block';
+        midiFolderTooltip.style.left = (e.clientX + 14) + 'px';
+        midiFolderTooltip.style.top = (e.clientY + 14) + 'px';
+      }, 500);
+    });
+    item.addEventListener('mousemove', function (e) {
+      if (midiFolderTooltip.style.display === 'block') {
+        midiFolderTooltip.style.left = (e.clientX + 14) + 'px';
+        midiFolderTooltip.style.top = (e.clientY + 14) + 'px';
+      }
+    });
+    item.addEventListener('mouseleave', function () {
+      clearTimeout(tooltipTimer);
+      midiFolderTooltip.style.display = 'none';
+    });
+
+    // Delete key
+    if (onDelete) {
+      item.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Delete') onDelete();
+      });
+    }
+    item.tabIndex = 0;
+    return item;
+  }
+
   function refreshMidiFolder() {
     getAllMidiFiles().then(function (files) {
       midiFolderList.innerHTML = '';
-      if (files.length === 0) {
-        var empty = document.createElement('div');
-        empty.className = 'w95-empty-msg';
-        empty.textContent = 'Empty — drag .mid files here';
-        midiFolderList.appendChild(empty);
-      }
-      files.forEach(function (f) {
-        var item = document.createElement('div');
-        item.className = 'w95-file-item';
-        item.dataset.id = f.id;
+      var totalCount = 0;
 
-        var iconEl = document.createElement('div');
-        iconEl.className = 'w95-file-icon';
-        iconEl.innerHTML = '<svg viewBox="0 0 32 32" width="32" height="32">' +
-          '<path d="M6 2h14l6 6v20H6z" fill="#fff" stroke="#000" stroke-width="1"/>' +
-          '<path d="M20 2v6h6" fill="#c0c0c0" stroke="#000" stroke-width="1"/>' +
-          '<text x="16" y="23" text-anchor="middle" font-size="14" font-family="serif" fill="#000080">\u266A</text>' +
-          '</svg>';
-
-        var nameEl = document.createElement('div');
-        nameEl.className = 'w95-file-name';
-        nameEl.textContent = f.name;
-        nameEl.title = f.name;
-
-        item.appendChild(iconEl);
-        item.appendChild(nameEl);
-
-        // Single click — select
-        item.addEventListener('click', function (e) {
-          e.stopPropagation();
-          var prev = midiFolderList.querySelector('.w95-file-item.selected');
-          if (prev) prev.classList.remove('selected');
-          item.classList.add('selected');
-          midiFolderSelected = f.id;
+      // ── Built-in example files (always first) ──
+      EXAMPLE_MIDIS.forEach(function (ex) {
+        if (_deletedExamples[ex.name]) return;
+        totalCount++;
+        var item = _createMidiFileItem(ex.name, ex.size, function () {
+          fetch(ex.path).then(function (r) {
+            if (!r.ok) throw new Error(r.status);
+            return r.arrayBuffer();
+          }).then(function (buf) {
+            if (externalLoadMidi) externalLoadMidi(buf, ex.name);
+          });
+        }, function () {
+          _deletedExamples[ex.name] = true;
+          refreshMidiFolder();
         });
+        midiFolderList.appendChild(item);
+      });
 
-        // Double click — load into MIDI player
-        item.addEventListener('dblclick', function () {
+      // ── User-imported files from IndexedDB ──
+      files.forEach(function (f) {
+        totalCount++;
+        var item = _createMidiFileItem(f.name, f.size, function () {
           getMidiFile(f.id).then(function (record) {
             if (record && record.data && externalLoadMidi) {
               externalLoadMidi(record.data, record.name);
             }
           });
+        }, function () {
+          midiFolderSelected = null;
+          deleteMidiFile(f.id).then(function () { refreshMidiFolder(); });
         });
-
-        // Hover tooltip
-        var tooltipTimer = null;
-        item.addEventListener('mouseenter', function (e) {
-          tooltipTimer = setTimeout(function () {
-            var meta = '';
-            meta += f.name + '\n';
-            meta += 'Type: MIDI Audio\n';
-            meta += 'Size: ' + formatFileSize(f.size);
-            midiFolderTooltip.textContent = meta;
-            midiFolderTooltip.style.display = 'block';
-            midiFolderTooltip.style.left = (e.clientX + 14) + 'px';
-            midiFolderTooltip.style.top = (e.clientY + 14) + 'px';
-          }, 500);
-        });
-        item.addEventListener('mousemove', function (e) {
-          if (midiFolderTooltip.style.display === 'block') {
-            midiFolderTooltip.style.left = (e.clientX + 14) + 'px';
-            midiFolderTooltip.style.top = (e.clientY + 14) + 'px';
-          }
-        });
-        item.addEventListener('mouseleave', function () {
-          clearTimeout(tooltipTimer);
-          midiFolderTooltip.style.display = 'none';
-        });
-
-        // Delete key
-        item.addEventListener('keydown', function (ev) {
-          if (ev.key === 'Delete' && midiFolderSelected === f.id) {
-            deleteMidiFile(f.id).then(function () { refreshMidiFolder(); });
-          }
-        });
-        item.tabIndex = 0;
-
+        item.dataset.id = f.id;
         midiFolderList.appendChild(item);
       });
-      midiFolderStatus.textContent = files.length ? files.length + ' object(s)' : 'Drag .mid files here';
+
+      if (totalCount === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'w95-empty-msg';
+        empty.textContent = 'Empty — drag .mid files here';
+        midiFolderList.appendChild(empty);
+      }
+      midiFolderStatus.textContent = totalCount ? totalCount + ' object(s)' : 'Drag .mid files here';
     });
   }
 
   // Create folder window on load
   createMidiFolder();
 
-  // ═══ Pre-load Example MIDI files ═══
+  // ═══ Built-in Example MIDI files (always visible) ═══
   var EXAMPLE_MIDIS = [
-    { name: 'Better Off Alone.mid', path: '../Example_MIDI/better-off-alone.mid' },
-    { name: 'Kawaikute Gomen.mid', path: '../Example_MIDI/ke-aikutegomen-kawaikute-gomen-honeyworks-feat-chu-chan-cv-saori-hayami.mid' },
-    { name: 'Midu.mid', path: '../Example_MIDI/mi-du-shan-ge-midu.mid' }
+    { name: 'Better Off Alone.mid', path: 'midi-examples/better-off-alone.mid', size: 5970 },
+    { name: 'Kawaikute Gomen.mid', path: 'midi-examples/ke-aikutegomen-kawaikute-gomen-honeyworks-feat-chu-chan-cv-saori-hayami.mid', size: 64585 },
+    { name: 'Midu.mid', path: 'midi-examples/mi-du-shan-ge-midu.mid', size: 61019 }
   ];
-  function loadExampleMidiFiles() {
-    getAllMidiFiles().then(function (existing) {
-      var existingNames = existing.map(function (f) { return f.name; });
-      var pending = EXAMPLE_MIDIS.filter(function (ex) {
-        return existingNames.indexOf(ex.name) === -1;
-      });
-      if (pending.length === 0) return;
-      var done = 0;
-      pending.forEach(function (ex) {
-        fetch(ex.path).then(function (r) {
-          if (!r.ok) throw new Error(r.status);
-          return r.arrayBuffer();
-        }).then(function (buf) {
-          return saveMidiFile(ex.name, buf);
-        }).then(function () {
-          done++;
-          if (done >= pending.length) refreshMidiFolder();
-        }).catch(function () { done++; });
-      });
-    });
-  }
-  loadExampleMidiFiles();
+  var _deletedExamples = {}; // session-only: tracks examples deleted this session
 
   // ═══ Synth UI Components ═══
 
