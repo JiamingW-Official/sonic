@@ -791,6 +791,18 @@ body.w95-dragging { cursor: default !important; }
   padding-left: 8px;
   padding-right: 8px;
 }
+.midi-player-key-badge {
+  display: inline-block;
+  background: #000080;
+  color: #fff;
+  font: bold 10px Tahoma, sans-serif;
+  padding: 2px 8px;
+  border-radius: 2px;
+  margin-left: 6px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
 
 /* Progress bar: inside player bar, wave = complexity */
 .midi-progress-wrap {

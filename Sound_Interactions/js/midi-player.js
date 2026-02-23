@@ -199,6 +199,13 @@ export function initMidiPlayer(api) {
   tapBtn.textContent = 'Tap';
   controlRow.appendChild(tapBtn);
 
+  // Key signature display
+  const keyLabel = document.createElement('span');
+  keyLabel.className = 'midi-player-key-badge';
+  keyLabel.textContent = 'Key: C Maj';
+  keyLabel.title = 'Detected key signature';
+  controlRow.appendChild(keyLabel);
+
   container.appendChild(controlRow);
 
   const trackList = document.createElement('div');
@@ -1653,7 +1660,12 @@ export function initMidiPlayer(api) {
   let playbackRate = 1;
   let detectedKeyRoot = 0;
   let detectedKeyScale = 'major';
-  const KEYSIG_TO_MAJOR_ROOT = { '0': 0, '1': 7, '2': 2, '3': 9, '4': 4, '5': 11, '6': 6, '7': 1, '-1': 5, '-2': 10, '-3': 3, '-4': 8, '-5': 1, '-6': 6, '-7': 11 };
+  // @tonejs/midi returns key as a string like "C", "D", "Eb", "F#"
+  const KEY_NAME_TO_ROOT = {
+    'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3,
+    'E': 4, 'Fb': 4, 'F': 5, 'F#': 6, 'Gb': 6, 'G': 7,
+    'G#': 8, 'Ab': 8, 'A': 9, 'A#': 10, 'Bb': 10, 'B': 11, 'Cb': 11
+  };
 
   // Krumhansl-Kessler key profiles for note-based key detection
   const KK_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
@@ -2606,8 +2618,10 @@ export function initMidiPlayer(api) {
   transposeSelect.addEventListener('change', () => {
     currentTranspose = parseInt(transposeSelect.value, 10) || 0;
     // Update keyboard key signature to match transposed key
+    const effectiveRoot = (detectedKeyRoot + (currentTranspose % 12) + 12) % 12;
+    const KEY_NAMES_T = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+    keyLabel.textContent = 'Key: ' + KEY_NAMES_T[effectiveRoot] + ' ' + (detectedKeyScale === 'minor' ? 'min' : 'Maj');
     if (window.__sonicRemoteAPI && window.__sonicRemoteAPI.setKeySignature) {
-      const effectiveRoot = (detectedKeyRoot + (currentTranspose % 12) + 12) % 12;
       window.__sonicRemoteAPI.setKeySignature(effectiveRoot, detectedKeyScale);
     }
     if (isPlaying && currentNotes.length) {
@@ -2686,23 +2700,23 @@ export function initMidiPlayer(api) {
     }
 
     // Detect key signature: prefer MIDI header, fallback to note analysis
+    // @tonejs/midi returns ks.key as string ("C","D","Eb","F#",...) and ks.scale as string ("major"/"minor")
     detectedKeyRoot = 0;
     detectedKeyScale = 'major';
     let headerHasKey = false;
     if (parsedMidi && parsedMidi.header) {
       const ksArr = parsedMidi.header.keySignatures;
-      console.log('[Sonic Key] MIDI header keySignatures:', ksArr);
+      console.log('[Sonic Key] MIDI header keySignatures:', JSON.stringify(ksArr));
       if (ksArr && ksArr.length > 0) {
         const ks = ksArr[0];
-        if (ks.key !== 0 || ks.scale === 'minor') {
-          const majorRoot = KEYSIG_TO_MAJOR_ROOT[String(ks.key)];
-          detectedKeyRoot = majorRoot != null ? majorRoot : 0;
+        const root = KEY_NAME_TO_ROOT[ks.key];
+        if (root != null) {
+          detectedKeyRoot = root;
           detectedKeyScale = ks.scale === 'minor' ? 'minor' : 'major';
-          if (detectedKeyScale === 'minor') {
-            detectedKeyRoot = (detectedKeyRoot - 3 + 12) % 12;
-          }
           headerHasKey = true;
-          console.log('[Sonic Key] From header: root=' + detectedKeyRoot + ' scale=' + detectedKeyScale);
+          console.log('[Sonic Key] From header: key="' + ks.key + '" → root=' + detectedKeyRoot + ' scale=' + detectedKeyScale);
+        } else {
+          console.log('[Sonic Key] Header key "' + ks.key + '" not recognized, using fallback');
         }
       }
     }
@@ -2711,12 +2725,14 @@ export function initMidiPlayer(api) {
       const detected = detectKeyFromNotes(parsedMidi);
       detectedKeyRoot = detected.root;
       detectedKeyScale = detected.scale;
-      console.log('[Sonic Key] From note analysis: root=' + detectedKeyRoot + ' scale=' + detectedKeyScale);
+      console.log('[Sonic Key] From note analysis (KK): root=' + detectedKeyRoot + ' scale=' + detectedKeyScale);
     }
     // Apply key signature (combined with current transpose)
     const KEY_NAMES_LOG = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
     const effectiveRoot = (detectedKeyRoot + (currentTranspose % 12) + 12) % 12;
-    console.log('[Sonic Key] Applying: ' + KEY_NAMES_LOG[effectiveRoot] + ' ' + detectedKeyScale + ' (transpose=' + currentTranspose + ')');
+    console.log('[Sonic Key] Applying: ' + KEY_NAMES_LOG[effectiveRoot] + ' ' + detectedKeyScale + ' (detected=' + KEY_NAMES_LOG[detectedKeyRoot] + ' transpose=' + currentTranspose + ')');
+    // Update key badge in UI
+    keyLabel.textContent = 'Key: ' + KEY_NAMES_LOG[effectiveRoot] + ' ' + (detectedKeyScale === 'minor' ? 'min' : 'Maj');
     if (window.__sonicRemoteAPI && window.__sonicRemoteAPI.setKeySignature) {
       window.__sonicRemoteAPI.setKeySignature(effectiveRoot, detectedKeyScale);
     } else {

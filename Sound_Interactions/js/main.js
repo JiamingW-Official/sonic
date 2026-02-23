@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js?v=2';
-import { initMidiPlayer } from './midi-player.js?v=2';
+import { initMidiPlayer } from './midi-player.js?v=3';
 
 (function () {
   const GRID_COLS = 12;
