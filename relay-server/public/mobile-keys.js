@@ -1,6 +1,6 @@
 /**
  * Sonic Mobile — Keyboard Controller (Slot 5)
- * Premium diatonic grid with touch glissando support.
+ * Win95-styled diatonic grid with touch glissando support.
  * Respects current key signature; no sharps/flats — diatonic only.
  */
 (function () {
@@ -22,9 +22,8 @@
   var currentRoot = 0;
   var currentScale = 'major';
 
-  // Active notes tracking - maps touchId -> midi note
+  // Active notes tracking
   var activeTouches = {};
-  // Maps midi -> { count, padEl }
   var activeNotes = {};
 
   function sendControl(action, params) {
@@ -87,7 +86,6 @@
   function getPadAtPoint(x, y) {
     var el = document.elementFromPoint(x, y);
     if (!el) return null;
-    // Walk up to find .keys-pad
     while (el && !el.classList.contains('keys-pad')) {
       el = el.parentElement;
     }
@@ -97,35 +95,38 @@
     return null;
   }
 
+  // Win95 degree colors (subtle tinted grays)
+  var DEGREE_BG = [
+    '#000080', '#6868a0', '#7878a8', '#6060a0',
+    '#7070a8', '#6868a0', '#5858a0'
+  ];
+  var DEGREE_BG_ACTIVE = [
+    '#0000c0', '#8080c0', '#9090c8', '#7878c0',
+    '#8888c8', '#8080c0', '#7070c0'
+  ];
+
   function buildUI(container) {
     container.innerHTML = '';
-    container.style.cssText = 'padding:0;display:flex;flex-direction:column;height:100%;background:#1a1a2e;';
+    container.style.cssText = 'padding:0;display:flex;flex-direction:column;height:100%;';
     noteOffAll();
 
     var intervals = getScaleIntervals();
 
-    // ── Header ──
+    // ── Header (Win95 groupbox style) ──
     var header = document.createElement('div');
-    header.className = 'keys-header-v2';
+    header.className = 'keys-header-w95';
 
-    var titleBlock = document.createElement('div');
-    titleBlock.className = 'keys-title-block';
     var titleEl = document.createElement('div');
-    titleEl.className = 'keys-title';
-    titleEl.textContent = 'KEYS';
-    var subtitleEl = document.createElement('div');
-    subtitleEl.className = 'keys-subtitle';
-    subtitleEl.textContent = '3 OCT \u00B7 DIATONIC';
-    titleBlock.appendChild(titleEl);
-    titleBlock.appendChild(subtitleEl);
-    header.appendChild(titleBlock);
+    titleEl.className = 'keys-title-w95';
+    titleEl.textContent = 'KEYBOARD';
+    header.appendChild(titleEl);
 
-    // Key selector
+    // Key selector row
     var keyRow = document.createElement('div');
-    keyRow.className = 'keys-selector-v2';
+    keyRow.className = 'keys-selector-w95';
 
     var prevBtn = document.createElement('button');
-    prevBtn.className = 'keys-arrow-btn';
+    prevBtn.className = 'w95-btn keys-nav-btn-w95';
     prevBtn.textContent = '\u25C0';
     prevBtn.addEventListener('click', function () {
       currentRoot = (currentRoot - 1 + 12) % 12;
@@ -135,12 +136,12 @@
     keyRow.appendChild(prevBtn);
 
     var keyLabel = document.createElement('div');
-    keyLabel.className = 'keys-current-key';
+    keyLabel.className = 'keys-key-display';
     keyLabel.textContent = getKeyLabel();
     keyRow.appendChild(keyLabel);
 
     var nextBtn = document.createElement('button');
-    nextBtn.className = 'keys-arrow-btn';
+    nextBtn.className = 'w95-btn keys-nav-btn-w95';
     nextBtn.textContent = '\u25B6';
     nextBtn.addEventListener('click', function () {
       currentRoot = (currentRoot + 1) % 12;
@@ -150,8 +151,8 @@
     keyRow.appendChild(nextBtn);
 
     var scaleBtn = document.createElement('button');
-    scaleBtn.className = 'keys-scale-toggle';
-    scaleBtn.textContent = currentScale === 'minor' ? 'min' : 'MAJ';
+    scaleBtn.className = 'w95-btn keys-scale-btn-w95';
+    scaleBtn.textContent = currentScale === 'minor' ? 'min' : 'Maj';
     scaleBtn.addEventListener('click', function () {
       currentScale = currentScale === 'minor' ? 'major' : 'minor';
       sendControl('keys:setKey', { root: currentRoot, scale: currentScale });
@@ -164,18 +165,13 @@
 
     // ── Grid: 7 columns × 3 rows ──
     var grid = document.createElement('div');
-    grid.className = 'keys-grid-v2';
+    grid.className = 'keys-grid-w95';
 
     var octaves = [
       { label: '5', base: 72 + currentRoot },
       { label: '4', base: 60 + currentRoot },
       { label: '3', base: 48 + currentRoot }
     ];
-
-    // Degree colors — gradient from warm to cool
-    var DEGREE_HUE = [220, 200, 180, 250, 210, 190, 240];
-    var DEGREE_SAT = [70, 55, 45, 65, 60, 50, 58];
-    var DEGREE_LIT = [38, 34, 32, 36, 35, 33, 30];
 
     for (var oi = 0; oi < octaves.length; oi++) {
       var oct = octaves[oi];
@@ -188,32 +184,20 @@
         pad.className = 'keys-pad';
         pad.dataset.midi = midi;
 
-        // Tonic pads get special highlight
         var isTonic = (di === 0);
-        var h = DEGREE_HUE[di];
-        var s = DEGREE_SAT[di];
-        var l = DEGREE_LIT[di];
-        if (isTonic) { s = 80; l = 42; }
-        // Higher octaves slightly brighter
-        l = l + (2 - oi) * 3;
-        pad.style.background = 'hsl(' + h + ',' + s + '%,' + l + '%)';
+        if (isTonic) pad.classList.add('tonic');
 
         // Note name
         var nameEl = document.createElement('div');
-        nameEl.className = 'keys-pad-note';
+        nameEl.className = 'keys-pad-name-w95';
         nameEl.textContent = noteName + noteOct;
         pad.appendChild(nameEl);
 
         // Degree label
         var degEl = document.createElement('div');
-        degEl.className = 'keys-pad-degree';
+        degEl.className = 'keys-pad-deg-w95';
         degEl.textContent = DEGREE_LABELS[di];
         pad.appendChild(degEl);
-
-        // Tonic marker
-        if (isTonic) {
-          pad.classList.add('tonic');
-        }
 
         grid.appendChild(pad);
       }
@@ -236,13 +220,10 @@
         var tid = t.identifier;
         var info = getPadAtPoint(t.clientX, t.clientY);
         var prevMidi = activeTouches[tid];
-
         if (info && info.midi !== prevMidi) {
-          // Finger moved to a different pad
           if (prevMidi !== undefined) noteOff(prevMidi, tid);
           noteOn(info.midi, info.el, tid);
         } else if (!info && prevMidi !== undefined) {
-          // Finger moved off all pads
           noteOff(prevMidi, tid);
         }
       }
@@ -267,7 +248,7 @@
       }
     });
 
-    // Mouse fallback for desktop testing
+    // Mouse fallback
     var mouseDown = false;
     grid.addEventListener('mousedown', function (e) {
       mouseDown = true;
@@ -300,11 +281,11 @@
 
     container.appendChild(grid);
 
-    // ── Footer hint ──
-    var footer = document.createElement('div');
-    footer.className = 'keys-footer-v2';
-    footer.textContent = 'Slide finger across pads to glissando';
-    container.appendChild(footer);
+    // Footer
+    var info = document.createElement('div');
+    info.className = 'keys-footer-w95';
+    info.textContent = 'Slide to glissando \u00B7 3 octaves \u00B7 diatonic';
+    container.appendChild(info);
   }
 
   // ── Public API ──
@@ -319,7 +300,6 @@
     buildUI(container);
   };
 
-  // Chain state sync handlers
   var origOnStateSync = window.__mobileOnStateSync;
   window.__mobileOnStateSync = function (slot, data) {
     if (data && data.keySignature) {

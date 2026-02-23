@@ -109,6 +109,10 @@
       handleControl(data.slot, data.action, data.params);
     });
 
+    socket.on('room:danmaku', function (data) {
+      spawnDanmaku(data.username, data.text);
+    });
+
     startMeterBroadcast();
   }
 
@@ -209,6 +213,68 @@
       void toast.offsetWidth;
       toast.classList.add('visible');
     }
+  }
+
+  // ═══════════════════════════════════════════════
+  // ═══ Danmaku (Barrage Comments) Renderer ═══
+  // ═══════════════════════════════════════════════
+
+  var _danmakuOverlay = null;
+  var _danmakuStyleInjected = false;
+
+  function ensureDanmakuOverlay() {
+    if (_danmakuOverlay) return;
+
+    if (!_danmakuStyleInjected) {
+      var s = document.createElement('style');
+      s.textContent = [
+        '.danmaku-overlay{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:999}',
+        '.danmaku-item{position:absolute;white-space:nowrap;pointer-events:none;' +
+          'font:bold 24px Tahoma,"MS Sans Serif",Arial,sans-serif;' +
+          'color:#fff;text-shadow:1px 1px 2px #000,-1px -1px 2px #000,1px -1px 2px #000,-1px 1px 2px #000;' +
+          'will-change:transform;line-height:1.2}'
+      ].join('\n');
+      document.head.appendChild(s);
+      _danmakuStyleInjected = true;
+    }
+
+    _danmakuOverlay = document.createElement('div');
+    _danmakuOverlay.className = 'danmaku-overlay';
+    document.body.appendChild(_danmakuOverlay);
+  }
+
+  function spawnDanmaku(username, text) {
+    ensureDanmakuOverlay();
+
+    var item = document.createElement('div');
+    item.className = 'danmaku-item';
+    item.textContent = username + ': ' + text;
+
+    // Random vertical position (top 10% to 80%)
+    var topPct = 10 + Math.random() * 70;
+    item.style.top = topPct + '%';
+    item.style.right = '0';
+    item.style.transform = 'translateX(100%)';
+
+    _danmakuOverlay.appendChild(item);
+
+    // Measure width for smooth scrolling
+    var w = item.offsetWidth;
+    var screenW = window.innerWidth;
+    var totalDist = screenW + w + 40;
+    var speed = 120; // px/s
+    var duration = totalDist / speed;
+
+    item.style.transition = 'transform ' + duration + 's linear';
+
+    // Force reflow then start animation
+    void item.offsetWidth;
+    item.style.transform = 'translateX(-' + (screenW + 40) + 'px)';
+
+    // Clean up after animation
+    setTimeout(function () {
+      if (item.parentNode) item.parentNode.removeChild(item);
+    }, duration * 1000 + 200);
   }
 
   // ═══════════════════════════════════════════════

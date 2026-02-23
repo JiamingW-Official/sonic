@@ -253,6 +253,54 @@
 
     body.appendChild(grid);
 
+    // ── Danmaku (barrage) input ──
+    var danmakuBox = el('div', 'w95-groupbox');
+    danmakuBox.style.marginTop = '8px';
+    var danmakuLabel = el('div', 'w95-groupbox-label', 'Danmaku');
+    danmakuBox.appendChild(danmakuLabel);
+
+    var danmakuRow = el('div', 'danmaku-input-row');
+    var danmakuInput = el('input', 'w95-input danmaku-input');
+    danmakuInput.type = 'text';
+    danmakuInput.placeholder = 'Type a comment...';
+    danmakuInput.maxLength = 100;
+    danmakuInput.autocomplete = 'off';
+    danmakuRow.appendChild(danmakuInput);
+
+    var danmakuSendBtn = el('button', 'w95-btn danmaku-send-btn', 'Send');
+    danmakuRow.appendChild(danmakuSendBtn);
+    danmakuBox.appendChild(danmakuRow);
+
+    var danmakuStatus = el('div', 'danmaku-status');
+    danmakuStatus.textContent = 'Send comments to the main screen';
+    danmakuBox.appendChild(danmakuStatus);
+
+    function sendDanmaku() {
+      var text = danmakuInput.value.trim();
+      if (!text || !socket) return;
+      socket.emit('client:danmaku', { text: text }, function (res) {
+        if (res && res.error) {
+          danmakuStatus.textContent = res.error;
+          danmakuStatus.style.color = '#c00';
+        } else {
+          danmakuStatus.textContent = 'Sent!';
+          danmakuStatus.style.color = '#008000';
+          danmakuInput.value = '';
+        }
+        setTimeout(function () {
+          danmakuStatus.textContent = 'Send comments to the main screen';
+          danmakuStatus.style.color = '';
+        }, 2000);
+      });
+    }
+
+    danmakuSendBtn.addEventListener('click', sendDanmaku);
+    danmakuInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') sendDanmaku();
+    });
+
+    body.appendChild(danmakuBox);
+
     var toast = el('div');
     toast.id = 'mobile-toast';
     toast.className = 'mobile-toast';

@@ -684,95 +684,65 @@ html, body {
 }
 
 /* ══════════════════════════════
-   Keyboard V2 — Premium Dark Theme
+   Keyboard — Win95 Style
    ══════════════════════════════ */
 
-.keys-header-v2 {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px 8px;
+.keys-header-w95 {
   flex-shrink: 0;
-  background: linear-gradient(180deg, #252540 0%, #1a1a2e 100%);
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 6px 8px;
+  background: #c0c0c0;
+  border-bottom: 1px solid #808080;
+  box-shadow: 0 1px 0 #fff;
 }
 
-.keys-title-block {
-  display: flex;
-  flex-direction: column;
+.keys-title-w95 {
+  font: bold 10px Tahoma, sans-serif;
+  color: #404040;
+  letter-spacing: 2px;
+  margin-bottom: 4px;
 }
 
-.keys-title {
-  font: bold 14px 'SF Mono', 'Consolas', Tahoma, monospace;
-  color: #e0e0ff;
-  letter-spacing: 3px;
-}
-
-.keys-subtitle {
-  font: 8px Tahoma, sans-serif;
-  color: rgba(255,255,255,0.3);
-  letter-spacing: 1px;
-  margin-top: 1px;
-}
-
-.keys-selector-v2 {
+.keys-selector-w95 {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
-.keys-arrow-btn {
+.keys-nav-btn-w95 {
   width: 32px;
-  height: 28px;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 4px;
-  color: #c0c0e0;
+  min-width: 32px;
+  min-height: 28px;
+  padding: 2px;
   font-size: 11px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.keys-arrow-btn:active {
-  background: rgba(255,255,255,0.18);
 }
 
-.keys-current-key {
-  font: bold 16px 'SF Mono', 'Consolas', Tahoma, monospace;
-  color: #fff;
-  min-width: 64px;
+.keys-key-display {
+  font: bold 14px Tahoma, sans-serif;
+  color: #000;
+  min-width: 72px;
   text-align: center;
-  background: rgba(0,0,128,0.5);
-  border: 1px solid rgba(100,100,255,0.3);
-  border-radius: 4px;
+  background: #fff;
+  border: 2px inset #808080;
   padding: 3px 8px;
   letter-spacing: 1px;
 }
 
-.keys-scale-toggle {
-  height: 28px;
-  padding: 0 10px;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 4px;
-  color: #c0c0e0;
+.keys-scale-btn-w95 {
+  min-width: 40px;
+  min-height: 28px;
   font: bold 10px Tahoma, sans-serif;
-  cursor: pointer;
   letter-spacing: 1px;
 }
-.keys-scale-toggle:active {
-  background: rgba(255,255,255,0.18);
-}
 
-.keys-grid-v2 {
+.keys-grid-w95 {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 3px;
-  padding: 6px;
+  gap: 2px;
+  padding: 4px;
   flex: 1;
   width: 100%;
-  background: #12122a;
+  background: #b8b4ac;
+  border: 1px inset #808080;
 }
 
 .keys-pad {
@@ -781,76 +751,97 @@ html, body {
   align-items: center;
   justify-content: center;
   min-height: 0;
-  border: none;
-  border-radius: 6px;
+  background: #d4d0c8;
+  border: 2px outset #ddd;
+  box-shadow:
+    inset -1px -1px 0 #808080,
+    inset 1px 1px 0 #fff;
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
   touch-action: none;
-  transition: transform 0.04s, filter 0.04s;
+  transition: transform 0.04s;
   position: relative;
-  overflow: hidden;
-  box-shadow:
-    0 2px 4px rgba(0,0,0,0.3),
-    inset 0 1px 0 rgba(255,255,255,0.1);
-}
-
-.keys-pad::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 6px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 50%);
-  pointer-events: none;
 }
 
 .keys-pad.tonic {
+  background: #000080;
+  border-color: #000060;
   box-shadow:
-    0 2px 6px rgba(80,80,255,0.3),
-    inset 0 1px 0 rgba(255,255,255,0.15);
-  border: 1px solid rgba(100,100,255,0.25);
+    inset -1px -1px 0 #000040,
+    inset 1px 1px 0 #4040c0;
+}
+
+.keys-pad.tonic .keys-pad-name-w95 {
+  color: #fff;
+}
+.keys-pad.tonic .keys-pad-deg-w95 {
+  color: rgba(255,255,255,0.6);
 }
 
 .keys-pad:active,
 .keys-pad.active {
-  transform: scale(0.93);
-  filter: brightness(1.8) saturate(1.3);
+  border-style: inset;
   box-shadow:
-    0 0 12px rgba(100,140,255,0.5),
-    inset 0 0 8px rgba(255,255,255,0.15);
+    inset 1px 1px 0 #808080,
+    inset -1px -1px 0 #fff;
+  transform: scale(0.96);
+  background: #000080;
 }
 
-.keys-pad-note {
-  font: bold 13px 'SF Mono', 'Consolas', Tahoma, monospace;
+.keys-pad.active .keys-pad-name-w95 {
   color: #fff;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
-  pointer-events: none;
-  z-index: 1;
+}
+.keys-pad.active .keys-pad-deg-w95 {
+  color: rgba(255,255,255,0.6);
 }
 
-.keys-pad-degree {
+.keys-pad-name-w95 {
+  font: bold 12px Tahoma, sans-serif;
+  color: #000;
+  pointer-events: none;
+}
+
+.keys-pad-deg-w95 {
   font: 9px Tahoma, sans-serif;
-  color: rgba(255,255,255,0.35);
-  margin-top: 2px;
+  color: #606060;
+  margin-top: 1px;
   pointer-events: none;
-  z-index: 1;
 }
 
-.keys-pad.active .keys-pad-note {
-  color: #fff;
-  text-shadow: 0 0 8px rgba(200,220,255,0.8);
-}
-
-.keys-pad.active .keys-pad-degree {
-  color: rgba(255,255,255,0.7);
-}
-
-.keys-footer-v2 {
+.keys-footer-w95 {
   flex-shrink: 0;
   text-align: center;
   font: 9px Tahoma, sans-serif;
-  color: rgba(255,255,255,0.25);
-  padding: 6px;
-  background: #1a1a2e;
-  letter-spacing: 0.5px;
+  color: #808080;
+  padding: 4px;
+  background: #c0c0c0;
+  border-top: 1px solid #fff;
+  box-shadow: 0 -1px 0 #808080;
+}
+
+/* ══════════════════════════════
+   Danmaku Input
+   ══════════════════════════════ */
+
+.danmaku-input-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.danmaku-input {
+  flex: 1;
+  min-height: 28px;
+}
+.danmaku-send-btn {
+  min-width: 52px;
+  min-height: 28px;
+  flex-shrink: 0;
+}
+.danmaku-status {
+  font-size: 9px;
+  color: #808080;
+  margin-top: 4px;
+  text-align: center;
+  min-height: 14px;
 }

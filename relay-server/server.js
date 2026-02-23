@@ -294,6 +294,30 @@ io.on('connection', (socket) => {
     });
   });
 
+  // === DANMAKU (barrage comments) ===
+  socket.on('client:danmaku', (data, cb) => {
+    const room = findRoomByClient(socket.id);
+    if (!room) return;
+    const client = room.clients.get(socket.id);
+    if (!client) return;
+
+    // Users occupying a slot cannot send danmaku
+    if (client.currentSlot) {
+      if (typeof cb === 'function') cb({ error: 'Cannot send while in a slot' });
+      return;
+    }
+
+    var text = (data && data.text || '').trim().slice(0, 100);
+    if (!text) return;
+
+    // Forward to host for rendering
+    io.to(room.hostSocketId).emit('room:danmaku', {
+      username: client.username,
+      text: text
+    });
+    if (typeof cb === 'function') cb({ ok: true });
+  });
+
   socket.on('client:leave', () => {
     const room = findRoomByClient(socket.id);
     if (room) removeClientFromRoom(room, socket.id);
