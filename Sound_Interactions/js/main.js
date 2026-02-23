@@ -6803,7 +6803,7 @@ import { initMidiPlayer } from './midi-player.js';
           midiFolderSelected = f.id;
         });
 
-        // Double click — load & play
+        // Double click — load into MIDI player
         item.addEventListener('dblclick', function () {
           getMidiFile(f.id).then(function (record) {
             if (record && record.data && externalLoadMidi) {
@@ -6861,14 +6861,12 @@ import { initMidiPlayer } from './midi-player.js';
     { name: 'Midu.mid', path: '../Example_MIDI/mi-du-shan-ge-midu.mid' }
   ];
   function loadExampleMidiFiles() {
-    var loaded = localStorage.getItem('sonicExamplesLoaded');
-    if (loaded) return;
     getAllMidiFiles().then(function (existing) {
       var existingNames = existing.map(function (f) { return f.name; });
       var pending = EXAMPLE_MIDIS.filter(function (ex) {
         return existingNames.indexOf(ex.name) === -1;
       });
-      if (pending.length === 0) { localStorage.setItem('sonicExamplesLoaded', '1'); return; }
+      if (pending.length === 0) return;
       var done = 0;
       pending.forEach(function (ex) {
         fetch(ex.path).then(function (r) {
@@ -6878,10 +6876,7 @@ import { initMidiPlayer } from './midi-player.js';
           return saveMidiFile(ex.name, buf);
         }).then(function () {
           done++;
-          if (done >= pending.length) {
-            localStorage.setItem('sonicExamplesLoaded', '1');
-            refreshMidiFolder();
-          }
+          if (done >= pending.length) refreshMidiFolder();
         }).catch(function () { done++; });
       });
     });
@@ -8247,7 +8242,7 @@ import { initMidiPlayer } from './midi-player.js';
     helpOverlayEl.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.82);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;padding:24px;opacity:0;visibility:hidden;transition:opacity 0.25s,visibility 0.25s;pointer-events:none';
     helpOverlayEl.innerHTML = `
       <div style="max-width:360px;font:11px/1.6 'SF Pro Text',system-ui,sans-serif;color:rgba(255,255,255,0.9);letter-spacing:0.03em;">
-        <div style="font-weight:600;margin-bottom:12px;font-size:13px;">Sound Matrix · 快捷键</div>
+        <div style="font-weight:600;margin-bottom:12px;font-size:13px;">Sonic · 快捷键</div>
         <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 20px;">
           <span style="color:rgba(255,255,255,0.5)">A–L ; ' \\</span><span>鼓组</span>
           <span style="color:rgba(255,255,255,0.5)">Z–M</span><span>低八度合成器</span>
@@ -8348,6 +8343,8 @@ import { initMidiPlayer } from './midi-player.js';
 
   function onKeyDown(e) {
     if (e.repeat) return;
+    // Ignore browser shortcuts (Cmd+R, Ctrl+R, etc.)
+    if (e.metaKey || e.ctrlKey) return;
     const key = e.code;
 
     // Help overlay: ? or Shift+/
@@ -8454,8 +8451,7 @@ import { initMidiPlayer } from './midi-player.js';
     keysPressed.add(key);
     const octaveUp = e.shiftKey ? 12 : 0;
     const midiPlay = Math.min(127, midi + octaveUp);
-    const asSustained = sustainPedalHeld || isSustainNote(midi);
-    if (asSustained) {
+    if (sustainPedalHeld) {
       const voice = playNote(midiPlay, true);
       if (voice) sustainedVoices.set(key, voice.stop);
     } else playNote(midiPlay, false);
@@ -8518,10 +8514,8 @@ import { initMidiPlayer } from './midi-player.js';
     e.preventDefault();
     keysPressed.delete(key);
     chordCount = keysPressed.size;
-    if (isSustainNote(KEY_TO_NOTE[key])) {
-      const stop = sustainedVoices.get(key);
-      if (stop) { stop(); sustainedVoices.delete(key); }
-    }
+    const stop = sustainedVoices.get(key);
+    if (stop) { stop(); sustainedVoices.delete(key); }
   }
 
   function updateKeyDisplay() {
@@ -9121,7 +9115,7 @@ import { initMidiPlayer } from './midi-player.js';
   var TUTORIAL_STEPS = [
     // ── 1. Welcome ──
     {
-      text: 'Welcome to Sound Matrix!\nA visual music playground.\nLet\u2019s learn how to use it.',
+      text: 'Welcome to Sonic!\nA visual music playground.\nLet\u2019s learn how to use it.',
       target: null, pos: 'center', advance: 'click'
     },
     // ── 2. Drums ──
@@ -9140,26 +9134,14 @@ import { initMidiPlayer } from './midi-player.js';
     },
     // ── 4. Sustain pedal ──
     {
-      text: 'Hold the Space bar to sustain notes.\nPress any key while holding Space,\nthen release to let them fade.',
+      text: 'Hold the Space bar to sustain notes.\nPress some keys while holding Space,\nthen release to let them fade.',
       target: null, pos: 'center',
       advance: 'keydown',
       keys: ['Space']
     },
-    // ── 5. Scroll zoom ──
+    // ── 5. Expand MIDI Library ──
     {
-      text: 'Use the scroll wheel\nto zoom in and out of the visuals.',
-      target: null, pos: 'center',
-      advance: 'wheel'
-    },
-    // ── 6. Double-click explosion ──
-    {
-      text: 'Double-click anywhere on the screen\nfor an explosion effect!',
-      target: null, pos: 'center',
-      advance: 'dblclick'
-    },
-    // ── 7. Expand MIDI Library ──
-    {
-      text: 'The MIDI Library contains example songs.\nDouble-click the title bar to expand it.',
+      text: 'The MIDI Library has example songs.\nDouble-click the title bar to expand it.',
       target: function () { return midiFolderEl ? midiFolderEl.querySelector('.w95-titlebar') : null; },
       pos: 'right',
       advance: 'action',
@@ -9176,28 +9158,45 @@ import { initMidiPlayer } from './midi-player.js';
         }
       }
     },
-    // ── 8. Play a MIDI file ──
+    // ── 6. Select a MIDI file ──
     {
-      text: 'Double-click any song\nto start automatic playback!\nWatch the visuals react to the music.',
+      text: 'Double-click a song to load it\ninto the MIDI player panel on the right.',
       target: function () { return midiFolderEl ? midiFolderEl.querySelector('.w95-filelist') : null; },
       pos: 'right',
       advance: 'action',
-      check: function () { return midiPlaybackActive; },
+      check: function () {
+        var btn = document.querySelector('.midi-float-panel .midi-player-btn');
+        return btn && !btn.disabled;
+      },
       setup: function () { refreshMidiFolder(); }
     },
-    // ── 9. MIDI playback controls ──
+    // ── 7. Click Play ──
+    {
+      text: 'Click Play to start playback!\nWatch the visuals react to the music.',
+      target: function () {
+        var btns = document.querySelectorAll('.midi-float-panel .midi-player-btn');
+        for (var i = 0; i < btns.length; i++) {
+          if (btns[i].textContent.indexOf('Play') >= 0) return btns[i];
+        }
+        return null;
+      },
+      pos: 'left',
+      advance: 'action',
+      check: function () { return midiPlaybackActive; }
+    },
+    // ── 8. MIDI playback controls ──
     {
       text: 'During MIDI playback:\nAlt + \u2191 / \u2193 \u2192 Change speed\nAlt + 0 \u2192 Reset speed\nEsc \u2192 Stop and clear sustain',
       target: null, pos: 'center', advance: 'click'
     },
-    // ── 10. Switch synth ──
+    // ── 9. Switch synth ──
     {
       text: 'Press  0  to cycle through\ndifferent synthesizers.\nTry it now!',
       target: null, pos: 'center',
       advance: 'keydown',
       keys: ['Digit0']
     },
-    // ── 11. Synth menu / Instruments ──
+    // ── 10. Synth menu / Instruments ──
     {
       text: 'Click "Synth" in the top menu\nto see all instruments, or open\nthe Instruments rack panel.',
       target: function () {
@@ -9210,33 +9209,19 @@ import { initMidiPlayer } from './midi-player.js';
       pos: 'below',
       advance: 'click'
     },
-    // ── 12. Visual effects ──
+    // ── 11. Visual effects ──
     {
       text: 'Try visual effects:\n7 \u2192 Pixel density (soft / dense / hard)\n8 \u2192 Analog screen (clean / CRT / VHS)\n9 \u2192 Text engine (clean / glitch / overclock)',
       target: null, pos: 'center',
       advance: 'keydown',
       keys: ['Digit7','Digit8','Digit9']
     },
-    // ── 13. Harmony ──
+    // ── 12. More features ──
     {
-      text: 'Press  6  to enable smart harmony.\nYour single notes will automatically\ngenerate chords (3rds, 5ths, 9ths).',
-      target: null, pos: 'center',
-      advance: 'keydown',
-      keys: ['Digit6']
-    },
-    // ── 14. Extra modes ──
-    {
-      text: 'More features:\n1 \u2192 Microphone input\n2 \u2192 Auto-arpeggiator\n3 \u2192 Camera head tracking\n4 \u2192 Ambient mode (auto-play)\n5 \u2192 Freeze visuals 2 sec\n\u2212 / = \u2192 Master volume',
+      text: 'More to explore:\n6 \u2192 Smart harmony (auto-chords)\n1 \u2192 Microphone   2 \u2192 Arpeggiator\n3 \u2192 Camera   4 \u2192 Ambient mode\n5 \u2192 Freeze visuals   \u2212 / = \u2192 Volume\nScroll \u2192 Zoom   Double-click \u2192 Explosion',
       target: null, pos: 'center', advance: 'click'
     },
-    // ── 15. Volume ──
-    {
-      text: 'Adjust master volume:\n\u2212  to decrease\n=  to increase\nCurrent: ' + (typeof masterVolume !== 'undefined' ? (masterVolume * 100 | 0) : 100) + '%',
-      target: null, pos: 'center',
-      advance: 'keydown',
-      keys: ['Minus','Equal','NumpadAdd','NumpadSubtract']
-    },
-    // ── 16. Help & finish ──
+    // ── 13. Done ──
     {
       text: 'Press  ?  anytime for all shortcuts.\nReplay this tutorial from\nTools \u2192 Tutorial.\n\nEnjoy making music!',
       target: null, pos: 'center', advance: 'click'
@@ -9412,7 +9397,7 @@ import { initMidiPlayer } from './midi-player.js';
     _cleanupTutListeners();
     if (_tutEl) _tutEl.style.display = 'none';
     if (_tutHighlight) _tutHighlight.style.display = 'none';
-    localStorage.setItem('sonicTutorialDone', '1');
+    sessionStorage.setItem('sonicTutorialDone', '1');
   }
 
   function startTutorial() {
@@ -9420,12 +9405,12 @@ import { initMidiPlayer } from './midi-player.js';
     _tutStep = 0;
     _tutActive = true;
     _tutDismissed = false;
-    localStorage.removeItem('sonicTutorialDone');
+    sessionStorage.removeItem('sonicTutorialDone');
     showTutorialStep();
   }
 
   // Auto-start tutorial on first visit
-  if (!localStorage.getItem('sonicTutorialDone')) {
+  if (!sessionStorage.getItem('sonicTutorialDone')) {
     setTimeout(startTutorial, 1200);
   }
   document.body.addEventListener('keydown', onKeyDown);

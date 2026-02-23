@@ -51,7 +51,7 @@ function tryListen() {
 server.on('listening', () => {
   if (announced) return;
   announced = true;
-  console.log('Sound Matrix: http://localhost:' + currentPort);
+  console.log('Sonic: http://localhost:' + currentPort);
 });
 
 server.on('error', (err) => {
