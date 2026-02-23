@@ -2699,33 +2699,47 @@ export function initMidiPlayer(api) {
       parsedMidi = null;
     }
 
-    // Detect key signature: prefer MIDI header, fallback to note analysis
+    // Detect key signature using two methods, prefer the more reliable one
     // @tonejs/midi returns ks.key as string ("C","D","Eb","F#",...) and ks.scale as string ("major"/"minor")
     detectedKeyRoot = 0;
     detectedKeyScale = 'major';
-    let headerHasKey = false;
+
+    // Method 1: MIDI header key signature
+    let headerRoot = null, headerScale = 'major';
     if (parsedMidi && parsedMidi.header) {
       const ksArr = parsedMidi.header.keySignatures;
       console.log('[Sonic Key] MIDI header keySignatures:', JSON.stringify(ksArr));
       if (ksArr && ksArr.length > 0) {
         const ks = ksArr[0];
-        const root = KEY_NAME_TO_ROOT[ks.key];
-        if (root != null) {
-          detectedKeyRoot = root;
-          detectedKeyScale = ks.scale === 'minor' ? 'minor' : 'major';
-          headerHasKey = true;
-          console.log('[Sonic Key] From header: key="' + ks.key + '" → root=' + detectedKeyRoot + ' scale=' + detectedKeyScale);
-        } else {
-          console.log('[Sonic Key] Header key "' + ks.key + '" not recognized, using fallback');
+        const r = KEY_NAME_TO_ROOT[ks.key];
+        if (r != null) {
+          headerRoot = r;
+          headerScale = ks.scale === 'minor' ? 'minor' : 'major';
+          console.log('[Sonic Key] Header says: key="' + ks.key + '" → root=' + headerRoot + ' scale=' + headerScale);
         }
       }
     }
-    // Fallback: analyze pitch class distribution (Krumhansl-Kessler algorithm)
-    if (!headerHasKey && parsedMidi) {
+
+    // Method 2: Krumhansl-Kessler note analysis (always run for accuracy)
+    let kkRoot = 0, kkScale = 'major';
+    if (parsedMidi) {
       const detected = detectKeyFromNotes(parsedMidi);
-      detectedKeyRoot = detected.root;
-      detectedKeyScale = detected.scale;
-      console.log('[Sonic Key] From note analysis (KK): root=' + detectedKeyRoot + ' scale=' + detectedKeyScale);
+      kkRoot = detected.root;
+      kkScale = detected.scale;
+      console.log('[Sonic Key] KK analysis: root=' + kkRoot + ' scale=' + kkScale);
+    }
+
+    // Decision: use header if it's a real key (not just default C major), otherwise use KK
+    if (headerRoot != null && !(headerRoot === 0 && headerScale === 'major')) {
+      // Header has a specific non-C-major key — trust it
+      detectedKeyRoot = headerRoot;
+      detectedKeyScale = headerScale;
+      console.log('[Sonic Key] Using header key (non-default)');
+    } else {
+      // Header is absent or says C major (often a default) — use KK analysis
+      detectedKeyRoot = kkRoot;
+      detectedKeyScale = kkScale;
+      console.log('[Sonic Key] Using KK analysis' + (headerRoot === 0 ? ' (header was C Maj default)' : ' (no header)'));
     }
     // Apply key signature (combined with current transpose)
     const KEY_NAMES_LOG = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];

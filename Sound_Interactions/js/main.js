@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GPUComputationRenderer } from './vendor/GPUComputationRenderer.js?v=2';
-import { initMidiPlayer } from './midi-player.js?v=3';
+import { initMidiPlayer } from './midi-player.js?v=4';
 
 (function () {
   const GRID_COLS = 12;
@@ -4837,13 +4837,25 @@ import { initMidiPlayer } from './midi-player.js?v=3';
     KEY_TO_NOTE.BracketRight = base4 + 12 + intervals[4]; // degree 5 of next octave
   }
 
+  // All 12 note names for display (use sharps for sharp keys, flats for flat keys)
+  const NOTE_NAMES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const NOTE_NAMES_FLAT  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+  const FLAT_ROOTS = [1, 3, 5, 8, 10]; // Db, Eb, Gb/F, Ab, Bb
+
+  function getScaleNoteNames() {
+    const intervals = getScaleIntervals();
+    const names = FLAT_ROOTS.indexOf(currentKeyRoot) >= 0 ? NOTE_NAMES_FLAT : NOTE_NAMES_SHARP;
+    return intervals.map(i => names[(currentKeyRoot + i) % 12]);
+  }
+
   function setKeySignature(root, scale) {
     currentKeyRoot = ((root % 12) + 12) % 12;
     currentKeyScale = scale === 'minor' ? 'minor' : 'major';
     rebuildKeyMapping();
     const label = KEY_ROOT_NAMES[currentKeyRoot] + ' ' + (currentKeyScale === 'minor' ? 'min' : 'Maj');
-    console.log('[Sonic Key] setKeySignature → ' + label + ' | KEY_TO_NOTE.KeyZ=' + KEY_TO_NOTE.KeyZ + ' KeyQ=' + KEY_TO_NOTE.KeyQ);
-    showModeToast('Key: ' + label);
+    const scaleNotes = getScaleNoteNames();
+    console.log('[Sonic Key] setKeySignature → ' + label + ' | scale: ' + scaleNotes.join('-') + ' | Z=' + KEY_TO_NOTE.KeyZ + ' Q=' + KEY_TO_NOTE.KeyQ);
+    showModeToast('Key: ' + label + '  ' + scaleNotes.join(' '));
     if (window.__sonicRemoteBridge && window.__sonicRemoteBridge.broadcastKeySignature) {
       window.__sonicRemoteBridge.broadcastKeySignature(currentKeyRoot, currentKeyScale, label);
     }
