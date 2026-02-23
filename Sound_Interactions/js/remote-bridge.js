@@ -198,7 +198,7 @@
     // Inject styles
     var style = document.createElement('style');
     style.textContent = [
-      '.sonic-remote-panel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:380px;z-index:1600;display:none;font-family:Tahoma,"MS Sans Serif",Arial,sans-serif}',
+      '.sonic-remote-panel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:380px;z-index:1600;font-family:Tahoma,"MS Sans Serif",Arial,sans-serif}',
       '.sonic-remote-panel .w95-window-body{padding:0;overflow:hidden}',
       // Hero section — dark gradient with QR
       '.srp-hero{background:linear-gradient(135deg,#0a0a2e 0%,#1a1a4e 50%,#0a1a3e 100%);padding:20px;text-align:center;position:relative}',
@@ -238,6 +238,7 @@
     document.head.appendChild(style);
 
     adminPanel = el('div', 'w95-window sonic-remote-panel');
+    adminPanel.style.display = 'none';
 
     // Titlebar
     var titlebar = el('div', 'w95-titlebar');
