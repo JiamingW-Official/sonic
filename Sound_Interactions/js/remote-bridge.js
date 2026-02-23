@@ -6,7 +6,6 @@
   'use strict';
 
   // ── Configuration ──
-  // Set this to your Render deployment URL (wss:// for production)
   var RELAY_URL = window.__SONIC_RELAY_URL || 'https://sonic-o6bm.onrender.com';
 
   var socket = null;
@@ -31,37 +30,53 @@
   // ── Connect to Relay ──
   function connect() {
     if (typeof io === 'undefined') {
-      console.warn('[Remote] socket.io not loaded');
+      console.warn('[Sonic Remote] socket.io client not loaded');
+      updateStatus('Error: socket.io not loaded');
       return;
     }
+    console.log('[Sonic Remote] Connecting to', RELAY_URL);
+    updateStatus('Connecting...');
+
     socket = io(RELAY_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 2000,
-      reconnectionAttempts: Infinity
+      reconnectionAttempts: Infinity,
+      timeout: 15000
     });
 
     socket.on('connect', function () {
       connected = true;
-      updateStatus('已连接');
+      console.log('[Sonic Remote] Connected, socket id:', socket.id);
+      updateStatus('Connected');
       // Create room
       socket.emit('host:create-room', {}, function (res) {
+        console.log('[Sonic Remote] create-room response:', res);
         if (res && res.roomId) {
           roomId = res.roomId;
           updateRoomInfo();
           sendStateSync();
+        } else {
+          updateStatus('Error: no room ID returned');
         }
       });
     });
 
-    socket.on('disconnect', function () {
+    socket.on('connect_error', function (err) {
+      console.warn('[Sonic Remote] Connection error:', err.message);
+      updateStatus('Connection error: ' + err.message);
+    });
+
+    socket.on('disconnect', function (reason) {
       connected = false;
-      updateStatus('已断开 — 重连中...');
+      console.log('[Sonic Remote] Disconnected:', reason);
+      updateStatus('Disconnected — reconnecting...');
     });
 
     socket.on('reconnect', function () {
       connected = true;
-      updateStatus('已重连');
+      console.log('[Sonic Remote] Reconnected');
+      updateStatus('Reconnected');
       socket.emit('host:create-room', {}, function (res) {
         if (res && res.roomId) {
           roomId = res.roomId;
@@ -73,18 +88,19 @@
 
     // ── Incoming events ──
     socket.on('room:client-joined', function (data) {
-      showToast(data.username + ' 已加入');
+      console.log('[Sonic Remote] Client joined:', data.username);
+      showToast(data.username + ' joined');
     });
 
     socket.on('room:client-left', function (data) {
-      showToast(data.username + ' 已离开');
+      console.log('[Sonic Remote] Client left:', data.username);
+      showToast(data.username + ' left');
     });
 
     socket.on('room:slot-changed', function (data) {
       slots = data.slots || slots;
       queue = data.queue || queue;
       renderSlots();
-      // If requestSync, send state to the newly joined slot
       if (data.requestSync) {
         sendStateSync();
       }
@@ -162,7 +178,7 @@
         if (params.isDrum) {
           api.setDrumTrackVolume(params.trackIndex, params.value / 100);
         } else if (params.trackIndex === -1) {
-          // Master handled via UI only
+          // Master
         } else {
           api.setTrackVolume(params.trackIndex, params.value / 100);
         }
@@ -212,13 +228,13 @@
     if (adminPanel) return;
 
     adminPanel = el('div', 'w95-window sonic-admin-panel');
-    adminPanel.style.cssText = 'position:fixed;right:12px;top:28px;width:310px;z-index:1600;display:none;';
+    adminPanel.style.cssText = 'position:fixed;left:50%;top:18%;transform:translateX(-50%);width:320px;z-index:1600;display:none;';
 
     // Titlebar
     var titlebar = el('div', 'w95-titlebar');
-    titlebar.innerHTML = '<span style="margin-right:4px">📡</span> <span class="w95-titlebar-text">Remote Control</span>';
+    titlebar.innerHTML = '<span style="margin-right:4px">\uD83D\uDCE1</span> <span class="w95-titlebar-text">Remote Control</span>';
     var btnGroup = el('div', 'w95-titlebar-buttons');
-    var closeBtn = el('button', 'w95-titlebar-btn', '×');
+    var closeBtn = el('button', 'w95-titlebar-btn', '\u00d7');
     closeBtn.onclick = function () { adminPanel.style.display = 'none'; };
     btnGroup.appendChild(closeBtn);
     titlebar.appendChild(btnGroup);
@@ -229,15 +245,16 @@
     titlebar.addEventListener('mousedown', function (e) {
       if (e.target.closest('.w95-titlebar-btn')) return;
       dragging = true;
-      dx = e.clientX - adminPanel.offsetLeft;
-      dy = e.clientY - adminPanel.offsetTop;
+      var rect = adminPanel.getBoundingClientRect();
+      dx = e.clientX - rect.left;
+      dy = e.clientY - rect.top;
       adminPanel.style.zIndex = ++_topZ;
     });
     document.addEventListener('mousemove', function (e) {
       if (!dragging) return;
       adminPanel.style.left = (e.clientX - dx) + 'px';
-      adminPanel.style.right = 'auto';
       adminPanel.style.top = (e.clientY - dy) + 'px';
+      adminPanel.style.transform = 'none';
     });
     document.addEventListener('mouseup', function () { dragging = false; });
 
@@ -248,7 +265,7 @@
     // Status
     var statusRow = el('div', 'sonic-admin-status');
     statusRow.id = 'sonic-admin-status';
-    statusRow.textContent = '正在连接...';
+    statusRow.textContent = 'Connecting...';
     statusRow.style.cssText = 'margin-bottom:6px;color:#808080;';
     body.appendChild(statusRow);
 
@@ -269,12 +286,12 @@
     var roomDetails = el('div');
     roomDetails.id = 'sonic-admin-room-details';
     roomDetails.style.cssText = 'font:10px Tahoma,sans-serif;word-break:break-all;color:#000;';
-    roomDetails.textContent = '等待创建房间...';
+    roomDetails.textContent = 'Waiting for room...';
     roomRow.appendChild(roomDetails);
     body.appendChild(roomRow);
 
     // Separator
-    body.appendChild(createSeparator('槽位状态'));
+    body.appendChild(createSeparator('Slots'));
 
     // Slots
     var slotsDiv = el('div');
@@ -282,12 +299,12 @@
     body.appendChild(slotsDiv);
 
     // Separator
-    body.appendChild(createSeparator('排队'));
+    body.appendChild(createSeparator('Queue'));
 
     // Queue
     var queueDiv = el('div');
     queueDiv.id = 'sonic-admin-queue';
-    queueDiv.textContent = '(暂无)';
+    queueDiv.textContent = '(empty)';
     queueDiv.style.cssText = 'color:#808080;font-size:10px;margin-bottom:4px;';
     body.appendChild(queueDiv);
 
@@ -323,16 +340,22 @@
   function updateRoomInfo() {
     var details = document.getElementById('sonic-admin-room-details');
     if (details && roomId) {
-      var joinUrl = RELAY_URL.replace(/^http/, 'http') + '/?room=' + roomId;
+      var joinUrl = RELAY_URL + '/?room=' + roomId;
       details.innerHTML = '<strong>Room:</strong> ' + roomId +
         '<br><span style="font-size:9px;color:#606060;">' + joinUrl + '</span>';
       // Generate QR
       var qrCanvas = document.getElementById('sonic-admin-qr');
       if (qrCanvas && typeof QRCode !== 'undefined') {
+        console.log('[Sonic Remote] Generating QR for:', joinUrl);
         QRCode.toCanvas(qrCanvas, joinUrl, {
           width: 128, margin: 1,
           color: { dark: '#000080', light: '#ffffff' }
+        }, function (err) {
+          if (err) console.error('[Sonic Remote] QR error:', err);
+          else console.log('[Sonic Remote] QR generated');
         });
+      } else {
+        console.warn('[Sonic Remote] QRCode lib not available:', typeof QRCode);
       }
     }
   }
@@ -343,9 +366,9 @@
     slotsDiv.innerHTML = '';
 
     var slotDefs = [
-      { key: 'instrument', label: '🎹 乐器', color: '#1084d0' },
-      { key: 'mixer', label: '🎚️ 混音', color: '#40a040' },
-      { key: 'fx', label: '🎛️ 效果器', color: '#d04040' }
+      { key: 'instrument', label: 'Instrument', icon: '\uD83C\uDFB9', color: '#1084d0' },
+      { key: 'mixer', label: 'Mixer', icon: '\uD83C\uDF9A\uFE0F', color: '#40a040' },
+      { key: 'fx', label: 'FX', icon: '\uD83C\uDF9B\uFE0F', color: '#d04040' }
     ];
 
     slotDefs.forEach(function (def) {
@@ -354,14 +377,14 @@
       var left = el('span');
       var occ = slots[def.key];
       if (occ) {
-        left.innerHTML = '<span style="color:' + def.color + '">' + def.label + ':</span> <strong>' + escHtml(occ.username) + '</strong>';
+        left.innerHTML = '<span style="color:' + def.color + '">' + def.icon + ' ' + def.label + ':</span> <strong>' + escHtml(occ.username) + '</strong>';
       } else {
-        left.innerHTML = '<span style="color:' + def.color + '">' + def.label + ':</span> <span style="color:#aaa">(空闲)</span>';
+        left.innerHTML = '<span style="color:' + def.color + '">' + def.icon + ' ' + def.label + ':</span> <span style="color:#aaa">(open)</span>';
       }
       row.appendChild(left);
 
       if (occ) {
-        var kickBtn = el('button', '', '踢出');
+        var kickBtn = el('button', '', 'Kick');
         kickBtn.style.cssText = 'font:10px Tahoma,sans-serif;padding:1px 6px;cursor:pointer;background:#c0c0c0;border:2px outset #ddd;';
         kickBtn.onclick = (function (sid) {
           return function () {
@@ -378,24 +401,20 @@
     var queueDiv = document.getElementById('sonic-admin-queue');
     if (queueDiv) {
       if (queue.length === 0) {
-        queueDiv.textContent = '(暂无)';
+        queueDiv.textContent = '(empty)';
         queueDiv.style.color = '#808080';
       } else {
         queueDiv.innerHTML = '';
+        var slotNames = { instrument: 'Instrument', mixer: 'Mixer', fx: 'FX' };
         queue.forEach(function (q) {
           var qRow = el('div');
-          qRow.textContent = q.username + ' → ' + slotLabel(q.requestedSlot);
+          qRow.textContent = q.username + ' \u2192 ' + (slotNames[q.requestedSlot] || q.requestedSlot);
           qRow.style.cssText = 'font-size:10px;padding:1px 0;';
           queueDiv.appendChild(qRow);
         });
         queueDiv.style.color = '#000';
       }
     }
-  }
-
-  function slotLabel(key) {
-    var map = { instrument: '乐器', mixer: '混音', fx: '效果器' };
-    return map[key] || key;
   }
 
   function escHtml(s) {
