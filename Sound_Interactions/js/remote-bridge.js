@@ -113,6 +113,10 @@
       spawnDanmaku(data.username, data.text);
     });
 
+    socket.on('room:emoji', function (data) {
+      showEmojiFullscreen(data.username, data.id);
+    });
+
     startMeterBroadcast();
   }
 
@@ -275,6 +279,185 @@
     setTimeout(function () {
       if (item.parentNode) item.parentNode.removeChild(item);
     }, duration * 1000 + 200);
+  }
+
+  // ═══════════════════════════════════════════════
+  // ═══ Fullscreen Emoji Sticker Display ═══
+  // ═══════════════════════════════════════════════
+
+  var _emojiStyleInjected = false;
+
+  // Inline SVG data for each emoji (matching mobile-emoji.js)
+  var EMOJI_SVGS = {
+    heart: function () {
+      return '<svg viewBox="0 0 16 16" shape-rendering="crispEdges">' +
+        '<rect x="2" y="3" width="2" height="2" fill="#ff0000"/>' +
+        '<rect x="4" y="2" width="2" height="2" fill="#ff0000"/>' +
+        '<rect x="6" y="3" width="2" height="2" fill="#ff0000"/>' +
+        '<rect x="8" y="2" width="2" height="2" fill="#ff0000"/>' +
+        '<rect x="10" y="3" width="2" height="2" fill="#ff0000"/>' +
+        '<rect x="12" y="3" width="2" height="2" fill="#ff0000"/>' +
+        '<rect x="2" y="5" width="12" height="2" fill="#ff0000"/>' +
+        '<rect x="3" y="7" width="10" height="2" fill="#ff0000"/>' +
+        '<rect x="4" y="9" width="8" height="2" fill="#ff0000"/>' +
+        '<rect x="5" y="11" width="6" height="2" fill="#ff0000"/>' +
+        '<rect x="6" y="13" width="4" height="1" fill="#ff0000"/>' +
+        '<rect x="7" y="14" width="2" height="1" fill="#ff0000"/>' +
+        '<rect x="4" y="3" width="1" height="2" fill="#ff8080"/>' +
+        '</svg>';
+    },
+    happy: function () {
+      return '<svg viewBox="0 0 16 16" shape-rendering="crispEdges">' +
+        '<rect x="4" y="1" width="8" height="1" fill="#000"/>' +
+        '<rect x="3" y="2" width="1" height="1" fill="#000"/><rect x="12" y="2" width="1" height="1" fill="#000"/>' +
+        '<rect x="2" y="3" width="1" height="2" fill="#000"/><rect x="13" y="3" width="1" height="2" fill="#000"/>' +
+        '<rect x="1" y="5" width="1" height="6" fill="#000"/><rect x="14" y="5" width="1" height="6" fill="#000"/>' +
+        '<rect x="2" y="11" width="1" height="2" fill="#000"/><rect x="13" y="11" width="1" height="2" fill="#000"/>' +
+        '<rect x="3" y="13" width="1" height="1" fill="#000"/><rect x="12" y="13" width="1" height="1" fill="#000"/>' +
+        '<rect x="4" y="14" width="8" height="1" fill="#000"/>' +
+        '<rect x="4" y="2" width="8" height="1" fill="#ffff00"/>' +
+        '<rect x="3" y="3" width="10" height="2" fill="#ffff00"/>' +
+        '<rect x="2" y="5" width="12" height="6" fill="#ffff00"/>' +
+        '<rect x="3" y="11" width="10" height="2" fill="#ffff00"/>' +
+        '<rect x="4" y="13" width="8" height="1" fill="#ffff00"/>' +
+        '<rect x="5" y="5" width="2" height="2" fill="#000"/>' +
+        '<rect x="9" y="5" width="2" height="2" fill="#000"/>' +
+        '<rect x="4" y="9" width="1" height="1" fill="#000"/>' +
+        '<rect x="5" y="10" width="6" height="1" fill="#000"/>' +
+        '<rect x="11" y="9" width="1" height="1" fill="#000"/>' +
+        '</svg>';
+    },
+    cry: function () {
+      return '<svg viewBox="0 0 16 16" shape-rendering="crispEdges">' +
+        '<rect x="4" y="1" width="8" height="1" fill="#000"/>' +
+        '<rect x="3" y="2" width="1" height="1" fill="#000"/><rect x="12" y="2" width="1" height="1" fill="#000"/>' +
+        '<rect x="2" y="3" width="1" height="2" fill="#000"/><rect x="13" y="3" width="1" height="2" fill="#000"/>' +
+        '<rect x="1" y="5" width="1" height="6" fill="#000"/><rect x="14" y="5" width="1" height="6" fill="#000"/>' +
+        '<rect x="2" y="11" width="1" height="2" fill="#000"/><rect x="13" y="11" width="1" height="2" fill="#000"/>' +
+        '<rect x="3" y="13" width="1" height="1" fill="#000"/><rect x="12" y="13" width="1" height="1" fill="#000"/>' +
+        '<rect x="4" y="14" width="8" height="1" fill="#000"/>' +
+        '<rect x="4" y="2" width="8" height="1" fill="#ffff00"/>' +
+        '<rect x="3" y="3" width="10" height="2" fill="#ffff00"/>' +
+        '<rect x="2" y="5" width="12" height="6" fill="#ffff00"/>' +
+        '<rect x="3" y="11" width="10" height="2" fill="#ffff00"/>' +
+        '<rect x="4" y="13" width="8" height="1" fill="#ffff00"/>' +
+        '<rect x="4" y="5" width="3" height="1" fill="#000"/><rect x="9" y="5" width="3" height="1" fill="#000"/>' +
+        '<rect x="4" y="7" width="1" height="3" fill="#4040ff"/><rect x="11" y="7" width="1" height="3" fill="#4040ff"/>' +
+        '<rect x="4" y="10" width="1" height="2" fill="#6060ff"/><rect x="11" y="10" width="1" height="2" fill="#6060ff"/>' +
+        '<rect x="5" y="11" width="1" height="1" fill="#000"/><rect x="6" y="10" width="4" height="1" fill="#000"/><rect x="10" y="11" width="1" height="1" fill="#000"/>' +
+        '</svg>';
+    },
+    skull: function () {
+      return '<svg viewBox="0 0 16 16" shape-rendering="crispEdges">' +
+        '<rect x="4" y="1" width="8" height="1" fill="#000"/>' +
+        '<rect x="3" y="2" width="1" height="1" fill="#000"/><rect x="12" y="2" width="1" height="1" fill="#000"/>' +
+        '<rect x="2" y="3" width="1" height="8" fill="#000"/><rect x="13" y="3" width="1" height="8" fill="#000"/>' +
+        '<rect x="3" y="11" width="1" height="1" fill="#000"/><rect x="12" y="11" width="1" height="1" fill="#000"/>' +
+        '<rect x="4" y="12" width="8" height="1" fill="#000"/>' +
+        '<rect x="4" y="2" width="8" height="1" fill="#fff"/><rect x="3" y="3" width="10" height="8" fill="#fff"/><rect x="4" y="11" width="8" height="1" fill="#fff"/>' +
+        '<rect x="4" y="4" width="1" height="1" fill="#000"/><rect x="6" y="4" width="1" height="1" fill="#000"/><rect x="5" y="5" width="1" height="1" fill="#000"/><rect x="4" y="6" width="1" height="1" fill="#000"/><rect x="6" y="6" width="1" height="1" fill="#000"/>' +
+        '<rect x="9" y="4" width="1" height="1" fill="#000"/><rect x="11" y="4" width="1" height="1" fill="#000"/><rect x="10" y="5" width="1" height="1" fill="#000"/><rect x="9" y="6" width="1" height="1" fill="#000"/><rect x="11" y="6" width="1" height="1" fill="#000"/>' +
+        '<rect x="5" y="9" width="6" height="1" fill="#000"/><rect x="5" y="10" width="1" height="1" fill="#000"/><rect x="7" y="10" width="1" height="1" fill="#000"/><rect x="9" y="10" width="1" height="1" fill="#000"/>' +
+        '</svg>';
+    },
+    fire: function () {
+      return '<svg viewBox="0 0 16 16" shape-rendering="crispEdges">' +
+        '<rect x="7" y="1" width="2" height="1" fill="#ff6000"/><rect x="6" y="2" width="3" height="1" fill="#ff6000"/>' +
+        '<rect x="6" y="3" width="4" height="1" fill="#ff8000"/><rect x="5" y="4" width="5" height="1" fill="#ff8000"/>' +
+        '<rect x="4" y="5" width="7" height="1" fill="#ff6000"/><rect x="4" y="6" width="8" height="1" fill="#ff8000"/>' +
+        '<rect x="3" y="7" width="9" height="1" fill="#ff6000"/><rect x="3" y="8" width="10" height="1" fill="#ff8000"/>' +
+        '<rect x="3" y="9" width="10" height="1" fill="#ff6000"/><rect x="3" y="10" width="10" height="1" fill="#ff4000"/>' +
+        '<rect x="4" y="11" width="9" height="1" fill="#ff4000"/><rect x="4" y="12" width="8" height="1" fill="#ff2000"/>' +
+        '<rect x="5" y="13" width="6" height="1" fill="#ff2000"/><rect x="6" y="14" width="4" height="1" fill="#c00000"/>' +
+        '<rect x="7" y="5" width="2" height="1" fill="#ffff00"/><rect x="6" y="6" width="3" height="1" fill="#ffff00"/>' +
+        '<rect x="6" y="7" width="4" height="1" fill="#ffff00"/><rect x="6" y="8" width="4" height="1" fill="#ffff80"/>' +
+        '<rect x="6" y="9" width="4" height="1" fill="#ffff00"/><rect x="7" y="10" width="3" height="1" fill="#ffff00"/>' +
+        '<rect x="7" y="11" width="2" height="1" fill="#ffff00"/>' +
+        '</svg>';
+    },
+    cool: function () {
+      return '<svg viewBox="0 0 16 16" shape-rendering="crispEdges">' +
+        '<rect x="4" y="1" width="8" height="1" fill="#000"/>' +
+        '<rect x="3" y="2" width="1" height="1" fill="#000"/><rect x="12" y="2" width="1" height="1" fill="#000"/>' +
+        '<rect x="2" y="3" width="1" height="2" fill="#000"/><rect x="13" y="3" width="1" height="2" fill="#000"/>' +
+        '<rect x="1" y="5" width="1" height="6" fill="#000"/><rect x="14" y="5" width="1" height="6" fill="#000"/>' +
+        '<rect x="2" y="11" width="1" height="2" fill="#000"/><rect x="13" y="11" width="1" height="2" fill="#000"/>' +
+        '<rect x="3" y="13" width="1" height="1" fill="#000"/><rect x="12" y="13" width="1" height="1" fill="#000"/>' +
+        '<rect x="4" y="14" width="8" height="1" fill="#000"/>' +
+        '<rect x="4" y="2" width="8" height="1" fill="#ffff00"/><rect x="3" y="3" width="10" height="2" fill="#ffff00"/>' +
+        '<rect x="2" y="5" width="12" height="6" fill="#ffff00"/><rect x="3" y="11" width="10" height="2" fill="#ffff00"/>' +
+        '<rect x="4" y="13" width="8" height="1" fill="#ffff00"/>' +
+        '<rect x="3" y="5" width="4" height="2" fill="#000"/><rect x="9" y="5" width="4" height="2" fill="#000"/>' +
+        '<rect x="7" y="5" width="2" height="1" fill="#000"/><rect x="2" y="5" width="1" height="1" fill="#000"/><rect x="13" y="5" width="1" height="1" fill="#000"/>' +
+        '<rect x="4" y="5" width="1" height="1" fill="#404080"/><rect x="10" y="5" width="1" height="1" fill="#404080"/>' +
+        '<rect x="5" y="10" width="5" height="1" fill="#000"/><rect x="10" y="9" width="1" height="1" fill="#000"/>' +
+        '</svg>';
+    },
+    star: function () {
+      return '<svg viewBox="0 0 16 16" shape-rendering="crispEdges">' +
+        '<rect x="7" y="1" width="2" height="2" fill="#ffcc00"/><rect x="6" y="3" width="4" height="1" fill="#ffcc00"/>' +
+        '<rect x="5" y="4" width="6" height="1" fill="#ffcc00"/><rect x="1" y="5" width="14" height="1" fill="#ffcc00"/>' +
+        '<rect x="2" y="6" width="12" height="1" fill="#ffcc00"/><rect x="3" y="7" width="10" height="2" fill="#ffcc00"/>' +
+        '<rect x="2" y="9" width="5" height="1" fill="#ffcc00"/><rect x="9" y="9" width="5" height="1" fill="#ffcc00"/>' +
+        '<rect x="2" y="10" width="4" height="1" fill="#ffcc00"/><rect x="10" y="10" width="4" height="1" fill="#ffcc00"/>' +
+        '<rect x="1" y="11" width="4" height="1" fill="#ffcc00"/><rect x="11" y="11" width="4" height="1" fill="#ffcc00"/>' +
+        '<rect x="1" y="12" width="3" height="1" fill="#ffcc00"/><rect x="12" y="12" width="3" height="1" fill="#ffcc00"/>' +
+        '<rect x="7" y="2" width="1" height="1" fill="#fff8c0"/><rect x="7" y="6" width="2" height="1" fill="#fff8c0"/>' +
+        '<rect x="7" y="0" width="2" height="1" fill="#cc9900"/><rect x="0" y="5" width="1" height="1" fill="#cc9900"/><rect x="15" y="5" width="1" height="1" fill="#cc9900"/>' +
+        '</svg>';
+    },
+    angry: function () {
+      return '<svg viewBox="0 0 16 16" shape-rendering="crispEdges">' +
+        '<rect x="4" y="1" width="8" height="1" fill="#000"/>' +
+        '<rect x="3" y="2" width="1" height="1" fill="#000"/><rect x="12" y="2" width="1" height="1" fill="#000"/>' +
+        '<rect x="2" y="3" width="1" height="2" fill="#000"/><rect x="13" y="3" width="1" height="2" fill="#000"/>' +
+        '<rect x="1" y="5" width="1" height="6" fill="#000"/><rect x="14" y="5" width="1" height="6" fill="#000"/>' +
+        '<rect x="2" y="11" width="1" height="2" fill="#000"/><rect x="13" y="11" width="1" height="2" fill="#000"/>' +
+        '<rect x="3" y="13" width="1" height="1" fill="#000"/><rect x="12" y="13" width="1" height="1" fill="#000"/>' +
+        '<rect x="4" y="14" width="8" height="1" fill="#000"/>' +
+        '<rect x="4" y="2" width="8" height="1" fill="#ff6040"/><rect x="3" y="3" width="10" height="2" fill="#ff6040"/>' +
+        '<rect x="2" y="5" width="12" height="6" fill="#ff6040"/><rect x="3" y="11" width="10" height="2" fill="#ff6040"/>' +
+        '<rect x="4" y="13" width="8" height="1" fill="#ff6040"/>' +
+        '<rect x="3" y="4" width="1" height="1" fill="#000"/><rect x="4" y="5" width="2" height="1" fill="#000"/>' +
+        '<rect x="12" y="4" width="1" height="1" fill="#000"/><rect x="10" y="5" width="2" height="1" fill="#000"/>' +
+        '<rect x="5" y="7" width="2" height="2" fill="#000"/><rect x="9" y="7" width="2" height="2" fill="#000"/>' +
+        '<rect x="6" y="11" width="4" height="1" fill="#000"/><rect x="5" y="12" width="1" height="1" fill="#000"/><rect x="10" y="12" width="1" height="1" fill="#000"/>' +
+        '</svg>';
+    }
+  };
+
+  function ensureEmojiStyles() {
+    if (_emojiStyleInjected) return;
+    var s = document.createElement('style');
+    s.textContent = [
+      '@keyframes emoji-pop{0%{transform:translate(-50%,-50%) scale(0);opacity:0}15%{transform:translate(-50%,-50%) scale(1.15);opacity:1}25%{transform:translate(-50%,-50%) scale(0.95)}35%{transform:translate(-50%,-50%) scale(1.05)}45%{transform:translate(-50%,-50%) scale(1)}85%{transform:translate(-50%,-50%) scale(1);opacity:1}100%{transform:translate(-50%,-50%) scale(1.3);opacity:0}}',
+      '.emoji-fullscreen{position:fixed;left:50%;top:45%;transform:translate(-50%,-50%);z-index:1000;pointer-events:none;text-align:center;animation:emoji-pop 4s ease-out forwards}',
+      '.emoji-fullscreen svg{width:240px;height:240px;image-rendering:pixelated;filter:drop-shadow(0 4px 20px rgba(0,0,0,0.5))}',
+      '.emoji-fullscreen-user{font:bold 14px Tahoma,"MS Sans Serif",sans-serif;color:#fff;text-shadow:1px 1px 3px #000,-1px -1px 3px #000;margin-top:8px;letter-spacing:1px}'
+    ].join('\n');
+    document.head.appendChild(s);
+    _emojiStyleInjected = true;
+  }
+
+  function showEmojiFullscreen(username, emojiId) {
+    ensureEmojiStyles();
+    var svgFn = EMOJI_SVGS[emojiId];
+    if (!svgFn) return;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'emoji-fullscreen';
+    wrap.innerHTML = svgFn();
+
+    var userLabel = document.createElement('div');
+    userLabel.className = 'emoji-fullscreen-user';
+    userLabel.textContent = username;
+    wrap.appendChild(userLabel);
+
+    document.body.appendChild(wrap);
+
+    setTimeout(function () {
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    }, 4200);
   }
 
   // ═══════════════════════════════════════════════

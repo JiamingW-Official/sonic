@@ -301,6 +301,38 @@
 
     body.appendChild(danmakuBox);
 
+    // ── Emoji Stickers Grid (2×4) ──
+    if (window.__sonicEmojis) {
+      var emojiBox = el('div', 'w95-groupbox');
+      emojiBox.style.marginTop = '8px';
+      var emojiLabel = el('div', 'w95-groupbox-label', 'Stickers');
+      emojiBox.appendChild(emojiLabel);
+
+      var emojiGrid = el('div', 'emoji-grid');
+      var emojis = window.__sonicEmojis;
+      for (var ei = 0; ei < emojis.length; ei++) {
+        (function (emoji) {
+          var btn = el('button', 'emoji-btn');
+          btn.title = emoji.title;
+          btn.innerHTML = emoji.svg();
+          btn.addEventListener('click', function () {
+            if (!socket) return;
+            socket.emit('client:emoji', { id: emoji.id }, function (res) {
+              if (res && res.error) {
+                showToast(res.error);
+              } else {
+                btn.classList.add('sent');
+                setTimeout(function () { btn.classList.remove('sent'); }, 600);
+              }
+            });
+          });
+          emojiGrid.appendChild(btn);
+        })(emojis[ei]);
+      }
+      emojiBox.appendChild(emojiGrid);
+      body.appendChild(emojiBox);
+    }
+
     var toast = el('div');
     toast.id = 'mobile-toast';
     toast.className = 'mobile-toast';
