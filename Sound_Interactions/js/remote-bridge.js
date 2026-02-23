@@ -49,7 +49,6 @@
       connected = true;
       console.log('[Sonic Remote] Connected, socket id:', socket.id);
       updateStatus('Connected');
-      // Create room
       socket.emit('host:create-room', {}, function (res) {
         console.log('[Sonic Remote] create-room response:', res);
         if (res && res.roomId) {
@@ -64,7 +63,7 @@
 
     socket.on('connect_error', function (err) {
       console.warn('[Sonic Remote] Connection error:', err.message);
-      updateStatus('Connection error: ' + err.message);
+      updateStatus('Connection error — retrying...');
     });
 
     socket.on('disconnect', function (reason) {
@@ -101,20 +100,17 @@
       slots = data.slots || slots;
       queue = data.queue || queue;
       renderSlots();
-      if (data.requestSync) {
-        sendStateSync();
-      }
+      if (data.requestSync) sendStateSync();
     });
 
     socket.on('room:control', function (data) {
       handleControl(data.slot, data.action, data.params);
     });
 
-    // Start meter broadcast loop
     startMeterBroadcast();
   }
 
-  // ── Send state sync to all clients ──
+  // ── Send state sync ──
   function sendStateSync() {
     if (!socket || !connected) return;
     var api = window.__sonicRemoteAPI;
@@ -129,15 +125,10 @@
         currentVariation: api.getCurrentVariation()
       }
     };
-
     if (mixer) {
       state.mixer = { tracks: mixer.getMixerTrackData() };
-      state.fx = {
-        fxNames: mixer.getFxNames(),
-        fxPresets: mixer.getFxPresets()
-      };
+      state.fx = { fxNames: mixer.getFxNames(), fxPresets: mixer.getFxPresets() };
     }
-
     socket.emit('host:state-sync', state);
   }
 
@@ -149,7 +140,7 @@
       var mixer = window.__sonicMixerAPI;
       if (!mixer) return;
       socket.emit('host:meter-update', mixer.getMeterLevels());
-    }, 66); // ~15fps
+    }, 66);
   }
 
   // ── Handle remote control commands ──
@@ -159,60 +150,34 @@
     if (!api) return;
 
     switch (action) {
-      // ── Instrument ──
       case 'synth:select':
-        api.selectSynth(params.presetIndex);
-        api.refreshSynthRack();
-        break;
+        api.selectSynth(params.presetIndex); api.refreshSynthRack(); break;
       case 'synth:param':
-        api.setSynthParam(params.presetIndex, params.path, params.value);
-        api.refreshSynthEditor();
-        break;
+        api.setSynthParam(params.presetIndex, params.path, params.value); api.refreshSynthEditor(); break;
       case 'synth:variation':
-        api.applySynthVariation(params.presetIndex, params.varIndex);
-        api.refreshSynthEditor();
-        break;
-
-      // ── Mixer ──
+        api.applySynthVariation(params.presetIndex, params.varIndex); api.refreshSynthEditor(); break;
       case 'mixer:volume':
-        if (params.isDrum) {
-          api.setDrumTrackVolume(params.trackIndex, params.value / 100);
-        } else if (params.trackIndex === -1) {
-          // Master
-        } else {
-          api.setTrackVolume(params.trackIndex, params.value / 100);
-        }
-        if (mixer) mixer.updateFaderUI(params.trackIndex, params.value);
-        break;
+        if (params.isDrum) api.setDrumTrackVolume(params.trackIndex, params.value / 100);
+        else if (params.trackIndex !== -1) api.setTrackVolume(params.trackIndex, params.value / 100);
+        if (mixer) mixer.updateFaderUI(params.trackIndex, params.value); break;
       case 'mixer:pan':
-        if (params.isDrum) {
-          api.setDrumTrackPan(params.trackIndex, params.value);
-        } else {
-          api.setTrackPan(params.trackIndex, params.value);
-        }
-        if (mixer) mixer.updatePanUI(params.trackIndex, params.value);
-        break;
+        if (params.isDrum) api.setDrumTrackPan(params.trackIndex, params.value);
+        else api.setTrackPan(params.trackIndex, params.value);
+        if (mixer) mixer.updatePanUI(params.trackIndex, params.value); break;
       case 'mixer:master-volume':
-        if (mixer) mixer.updateFaderUI(-1, params.value);
-        break;
-
-      // ── FX ──
+        if (mixer) mixer.updateFaderUI(-1, params.value); break;
       case 'fx:toggle':
-        api.setTrackEffectEnabled(params.trackIndex, params.isDrum, params.effectName, params.enabled);
-        break;
+        api.setTrackEffectEnabled(params.trackIndex, params.isDrum, params.effectName, params.enabled); break;
       case 'fx:param':
-        api.setTrackEffectParam(params.trackIndex, params.isDrum, params.effectName, params.paramName, params.value);
-        break;
+        api.setTrackEffectParam(params.trackIndex, params.isDrum, params.effectName, params.paramName, params.value); break;
       case 'fx:main-toggle':
-        api.setMainEffectEnabled(params.effectName, params.enabled);
-        break;
+        api.setMainEffectEnabled(params.effectName, params.enabled); break;
       case 'fx:main-param':
-        api.setMainEffectParam(params.effectName, params.paramName, params.value);
-        break;
+        api.setMainEffectParam(params.effectName, params.paramName, params.value); break;
     }
   }
 
-  // ── Toast notification ──
+  // ── Toast ──
   function showToast(msg) {
     var toast = document.getElementById('mode-toast');
     if (toast) {
@@ -223,12 +188,56 @@
     }
   }
 
-  // ═══ Admin Panel UI (Win95 window) ═══
+  // ═══════════════════════════════════════════════
+  // ═══ Admin Panel — Premium Apple TV Style ═══
+  // ═══════════════════════════════════════════════
+
   function createAdminPanel() {
     if (adminPanel) return;
 
-    adminPanel = el('div', 'w95-window sonic-admin-panel');
-    adminPanel.style.cssText = 'position:fixed;left:50%;top:18%;transform:translateX(-50%);width:320px;z-index:1600;display:none;';
+    // Inject styles
+    var style = document.createElement('style');
+    style.textContent = [
+      '.sonic-remote-panel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:380px;z-index:1600;display:none;font-family:Tahoma,"MS Sans Serif",Arial,sans-serif}',
+      '.sonic-remote-panel .w95-window-body{padding:0;overflow:hidden}',
+      // Hero section — dark gradient with QR
+      '.srp-hero{background:linear-gradient(135deg,#0a0a2e 0%,#1a1a4e 50%,#0a1a3e 100%);padding:20px;text-align:center;position:relative}',
+      '.srp-hero::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(16,132,208,0.08) 0%,transparent 70%);pointer-events:none}',
+      '.srp-status{font-size:10px;color:#60a0d0;margin-bottom:12px;letter-spacing:0.5px}',
+      '.srp-status.ok{color:#40d080}',
+      '.srp-status.err{color:#d06040}',
+      // QR
+      '.srp-qr{width:160px;height:160px;margin:0 auto 14px;border:3px solid rgba(255,255,255,0.15);border-radius:8px;background:#fff;display:block;image-rendering:pixelated}',
+      '.srp-qr-placeholder{width:160px;height:160px;margin:0 auto 14px;border:3px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.2);font-size:28px}',
+      // Room code — big Apple TV style
+      '.srp-room-label{font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:2px;margin-bottom:4px}',
+      '.srp-room-code{font-size:32px;font-weight:bold;letter-spacing:8px;color:#fff;text-shadow:0 0 20px rgba(16,132,208,0.5);margin-bottom:10px;font-family:"Courier New",monospace;user-select:all}',
+      // URL row
+      '.srp-url-row{display:flex;align-items:center;gap:4px;background:rgba(0,0,0,0.3);border-radius:4px;padding:4px 8px;margin:0 auto;max-width:340px}',
+      '.srp-url{flex:1;font-size:9px;color:rgba(255,255,255,0.6);word-break:break-all;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(255,255,255,0.2)}',
+      '.srp-url:hover{color:#fff}',
+      '.srp-copy-btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#fff;font-size:9px;padding:2px 8px;border-radius:3px;cursor:pointer;white-space:nowrap;flex-shrink:0}',
+      '.srp-copy-btn:hover{background:rgba(255,255,255,0.2)}',
+      '.srp-copy-btn:active{background:rgba(16,132,208,0.4)}',
+      // Slots section
+      '.srp-slots{padding:8px 12px;background:#c0c0c0}',
+      '.srp-slot-row{display:flex;align-items:center;justify-content:space-between;padding:4px 6px;margin-bottom:2px;background:#fff;border:1px solid #808080;box-shadow:inset -1px -1px 0 #dfdfdf,inset 1px 1px 0 #404040}',
+      '.srp-slot-info{display:flex;align-items:center;gap:6px}',
+      '.srp-slot-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}',
+      '.srp-slot-dot.open{background:#808080}',
+      '.srp-slot-dot.active{box-shadow:0 0 6px currentColor}',
+      '.srp-slot-name{font-size:11px;font-weight:bold}',
+      '.srp-slot-user{font-size:10px;color:#404040}',
+      '.srp-kick-btn{font:9px Tahoma,sans-serif;padding:1px 8px;cursor:pointer;background:#c0c0c0;border:2px outset #ddd}',
+      '.srp-kick-btn:active{border-style:inset}',
+      // Queue
+      '.srp-queue{padding:4px 12px 6px;background:#c0c0c0;border-top:1px solid #808080}',
+      '.srp-queue-label{font:bold 9px Tahoma,sans-serif;color:#606060;margin-bottom:2px}',
+      '.srp-queue-item{font-size:10px;color:#404040;padding:1px 0}'
+    ].join('\n');
+    document.head.appendChild(style);
+
+    adminPanel = el('div', 'w95-window sonic-remote-panel');
 
     // Titlebar
     var titlebar = el('div', 'w95-titlebar');
@@ -260,111 +269,128 @@
 
     // Body
     var body = el('div', 'w95-window-body');
-    body.style.cssText = 'padding:8px;font:11px Tahoma,sans-serif;';
 
-    // Status
-    var statusRow = el('div', 'sonic-admin-status');
-    statusRow.id = 'sonic-admin-status';
-    statusRow.textContent = 'Connecting...';
-    statusRow.style.cssText = 'margin-bottom:6px;color:#808080;';
-    body.appendChild(statusRow);
+    // ── Hero section (dark, QR + code) ──
+    var hero = el('div', 'srp-hero');
 
-    // Room info
-    var roomRow = el('div', 'sonic-admin-room');
-    roomRow.id = 'sonic-admin-room';
-    roomRow.style.cssText = 'display:flex;gap:10px;align-items:flex-start;margin-bottom:8px;';
-    // QR image
-    var qrWrap = el('div');
-    qrWrap.style.cssText = 'flex-shrink:0;';
-    var qrImg = document.createElement('img');
-    qrImg.id = 'sonic-admin-qr';
-    qrImg.style.cssText = 'width:128px;height:128px;border:1px solid #808080;background:#fff;display:block;';
-    qrWrap.appendChild(qrImg);
-    roomRow.appendChild(qrWrap);
-    // Room details
-    var roomDetails = el('div');
-    roomDetails.id = 'sonic-admin-room-details';
-    roomDetails.style.cssText = 'font:10px Tahoma,sans-serif;word-break:break-all;color:#000;';
-    roomDetails.textContent = 'Waiting for room...';
-    roomRow.appendChild(roomDetails);
-    body.appendChild(roomRow);
+    var statusEl = el('div', 'srp-status');
+    statusEl.id = 'srp-status';
+    statusEl.textContent = 'CONNECTING...';
+    hero.appendChild(statusEl);
 
-    // Separator
-    body.appendChild(createSeparator('Slots'));
+    // QR placeholder (replaced when room created)
+    var qrPlaceholder = el('div', 'srp-qr-placeholder');
+    qrPlaceholder.id = 'srp-qr-wrap';
+    qrPlaceholder.textContent = '?';
+    hero.appendChild(qrPlaceholder);
 
-    // Slots
+    // Room code label
+    var roomLabel = el('div', 'srp-room-label', 'ROOM CODE');
+    hero.appendChild(roomLabel);
+
+    // Room code (big)
+    var roomCode = el('div', 'srp-room-code');
+    roomCode.id = 'srp-room-code';
+    roomCode.textContent = '- - - - - -';
+    hero.appendChild(roomCode);
+
+    // URL row
+    var urlRow = el('div', 'srp-url-row');
+    urlRow.id = 'srp-url-row';
+    urlRow.style.display = 'none';
+    var urlText = el('span', 'srp-url');
+    urlText.id = 'srp-url-text';
+    urlText.title = 'Click to open';
+    urlText.addEventListener('click', function () {
+      var url = urlText.dataset.url;
+      if (url) window.open(url, '_blank');
+    });
+    var copyBtn = el('button', 'srp-copy-btn', 'Copy');
+    copyBtn.addEventListener('click', function () {
+      var url = urlText.dataset.url;
+      if (url && navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(function () {
+          copyBtn.textContent = 'Copied!';
+          setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1500);
+        });
+      }
+    });
+    urlRow.appendChild(urlText);
+    urlRow.appendChild(copyBtn);
+    hero.appendChild(urlRow);
+
+    body.appendChild(hero);
+
+    // ── Slots section ──
+    var slotsSection = el('div', 'srp-slots');
     var slotsDiv = el('div');
-    slotsDiv.id = 'sonic-admin-slots';
-    body.appendChild(slotsDiv);
+    slotsDiv.id = 'srp-slots';
+    slotsSection.appendChild(slotsDiv);
+    body.appendChild(slotsSection);
 
-    // Separator
-    body.appendChild(createSeparator('Queue'));
-
-    // Queue
+    // ── Queue section ──
+    var queueSection = el('div', 'srp-queue');
+    var queueLabel = el('div', 'srp-queue-label', 'QUEUE');
+    queueSection.appendChild(queueLabel);
     var queueDiv = el('div');
-    queueDiv.id = 'sonic-admin-queue';
+    queueDiv.id = 'srp-queue';
     queueDiv.textContent = '(empty)';
-    queueDiv.style.cssText = 'color:#808080;font-size:10px;margin-bottom:4px;';
-    body.appendChild(queueDiv);
+    queueDiv.style.cssText = 'color:#808080;font-size:10px;';
+    queueSection.appendChild(queueDiv);
+    body.appendChild(queueSection);
 
     adminPanel.appendChild(body);
     document.body.appendChild(adminPanel);
-
     renderSlots();
   }
 
-  function createSeparator(label) {
-    var wrap = el('div');
-    wrap.style.cssText = 'display:flex;align-items:center;gap:4px;margin:6px 0 4px;';
-    var line1 = el('div');
-    line1.style.cssText = 'flex:1;height:1px;background:#808080;box-shadow:0 1px 0 #fff;';
-    var txt = el('span', '', label);
-    txt.style.cssText = 'font:bold 10px Tahoma,sans-serif;color:#404040;white-space:nowrap;';
-    var line2 = el('div');
-    line2.style.cssText = 'flex:1;height:1px;background:#808080;box-shadow:0 1px 0 #fff;';
-    wrap.appendChild(line1);
-    wrap.appendChild(txt);
-    wrap.appendChild(line2);
-    return wrap;
-  }
-
   function updateStatus(msg) {
-    var s = document.getElementById('sonic-admin-status');
-    if (s) {
-      s.textContent = msg;
-      s.style.color = connected ? '#008000' : '#808080';
-    }
+    var s = document.getElementById('srp-status');
+    if (!s) return;
+    s.textContent = msg.toUpperCase();
+    s.className = 'srp-status' + (connected ? ' ok' : ' err');
   }
 
   function updateRoomInfo() {
-    var details = document.getElementById('sonic-admin-room-details');
-    if (details && roomId) {
-      var joinUrl = RELAY_URL + '/?room=' + roomId;
-      details.innerHTML = '<strong>Room:</strong> ' + roomId +
-        '<br><span style="font-size:9px;color:#606060;">' + joinUrl + '</span>';
-      // Generate QR
-      var qrImg = document.getElementById('sonic-admin-qr');
-      if (qrImg && typeof QRCode !== 'undefined') {
-        console.log('[Sonic Remote] Generating QR for:', joinUrl);
-        QRCode.toDataURL(joinUrl, {
-          width: 256, margin: 1,
-          color: { dark: '#000080', light: '#ffffff' }
-        }, function (err, url) {
-          if (err) {
-            console.error('[Sonic Remote] QR error:', err);
-          } else {
-            console.log('[Sonic Remote] QR generated OK');
-            qrImg.src = url;
-          }
-        });
-      } else {
-        console.warn('[Sonic Remote] QRCode lib not available:', typeof QRCode);
-      }
+    if (!roomId) return;
+    var joinUrl = RELAY_URL + '/?room=' + roomId;
+
+    // Room code
+    var codeEl = document.getElementById('srp-room-code');
+    if (codeEl) {
+      // Display with spaces between chars for Apple TV look
+      codeEl.textContent = roomId.toUpperCase().split('').join(' ');
+    }
+
+    // QR via API (100% reliable, no library needed)
+    var qrWrap = document.getElementById('srp-qr-wrap');
+    if (qrWrap) {
+      var img = document.createElement('img');
+      img.className = 'srp-qr';
+      img.alt = 'Scan to connect';
+      img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' +
+        encodeURIComponent(joinUrl) + '&color=000080&bgcolor=ffffff&margin=8';
+      img.onerror = function () {
+        // Fallback: try Google Charts
+        img.src = 'https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=' +
+          encodeURIComponent(joinUrl) + '&chco=000080';
+      };
+      qrWrap.replaceWith(img);
+      img.id = 'srp-qr-wrap';
+    }
+
+    // URL
+    var urlRow = document.getElementById('srp-url-row');
+    var urlText = document.getElementById('srp-url-text');
+    if (urlRow && urlText) {
+      urlRow.style.display = '';
+      urlText.textContent = joinUrl;
+      urlText.dataset.url = joinUrl;
     }
   }
 
   function renderSlots() {
-    var slotsDiv = document.getElementById('sonic-admin-slots');
+    var slotsDiv = document.getElementById('srp-slots');
     if (!slotsDiv) return;
     slotsDiv.innerHTML = '';
 
@@ -375,20 +401,37 @@
     ];
 
     slotDefs.forEach(function (def) {
-      var row = el('div');
-      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:3px 4px;margin-bottom:2px;border:1px solid #808080;background:#fff;';
-      var left = el('span');
+      var row = el('div', 'srp-slot-row');
+      var info = el('div', 'srp-slot-info');
+
+      var dot = el('div', 'srp-slot-dot');
       var occ = slots[def.key];
       if (occ) {
-        left.innerHTML = '<span style="color:' + def.color + '">' + def.icon + ' ' + def.label + ':</span> <strong>' + escHtml(occ.username) + '</strong>';
+        dot.classList.add('active');
+        dot.style.background = def.color;
+        dot.style.color = def.color;
       } else {
-        left.innerHTML = '<span style="color:' + def.color + '">' + def.icon + ' ' + def.label + ':</span> <span style="color:#aaa">(open)</span>';
+        dot.classList.add('open');
       }
-      row.appendChild(left);
+      info.appendChild(dot);
+
+      var nameSpan = el('span', 'srp-slot-name');
+      nameSpan.innerHTML = def.icon + ' ' + def.label;
+      info.appendChild(nameSpan);
 
       if (occ) {
-        var kickBtn = el('button', '', 'Kick');
-        kickBtn.style.cssText = 'font:10px Tahoma,sans-serif;padding:1px 6px;cursor:pointer;background:#c0c0c0;border:2px outset #ddd;';
+        var userSpan = el('span', 'srp-slot-user', occ.username);
+        info.appendChild(userSpan);
+      } else {
+        var openSpan = el('span', 'srp-slot-user', '(open)');
+        openSpan.style.color = '#aaa';
+        info.appendChild(openSpan);
+      }
+
+      row.appendChild(info);
+
+      if (occ) {
+        var kickBtn = el('button', 'srp-kick-btn', 'Kick');
         kickBtn.onclick = (function (sid) {
           return function () {
             if (socket && connected) socket.emit('host:kick', { socketId: sid });
@@ -401,7 +444,7 @@
     });
 
     // Queue
-    var queueDiv = document.getElementById('sonic-admin-queue');
+    var queueDiv = document.getElementById('srp-queue');
     if (queueDiv) {
       if (queue.length === 0) {
         queueDiv.textContent = '(empty)';
@@ -410,20 +453,13 @@
         queueDiv.innerHTML = '';
         var slotNames = { instrument: 'Instrument', mixer: 'Mixer', fx: 'FX' };
         queue.forEach(function (q) {
-          var qRow = el('div');
+          var qRow = el('div', 'srp-queue-item');
           qRow.textContent = q.username + ' \u2192 ' + (slotNames[q.requestedSlot] || q.requestedSlot);
-          qRow.style.cssText = 'font-size:10px;padding:1px 0;';
           queueDiv.appendChild(qRow);
         });
         queueDiv.style.color = '#000';
       }
     }
-  }
-
-  function escHtml(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
   }
 
   // ═══ Public API ═══
