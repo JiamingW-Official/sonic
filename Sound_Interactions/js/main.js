@@ -8182,6 +8182,7 @@ import { initMidiPlayer } from './midi-player.js';
             showModeToast('Freeze 2s');
           } },
           '---',
+          { label: 'Tutorial', action: function () { startTutorial(); } },
           { label: 'Help', shortcut: '?', action: function () { toggleHelp(); } }
         ];
       } }
@@ -9109,6 +9110,324 @@ import { initMidiPlayer } from './midi-player.js';
   setTimeout(hideIntroHint, 8000);
   document.body.addEventListener('click', onFirstInteraction);
   document.body.addEventListener('keydown', onFirstInteraction);
+
+  // ═══ Interactive Tutorial / Onboarding ═══
+  var _tutStep = 0;
+  var _tutEl = null;       // the callout box
+  var _tutHighlight = null; // the spotlight ring element
+  var _tutActive = false;
+  var _tutDismissed = false;
+
+  var TUTORIAL_STEPS = [
+    // ── 1. Welcome ──
+    {
+      text: 'Welcome to Sound Matrix!\nA visual music playground.\nLet\u2019s learn how to use it.',
+      target: null, pos: 'center', advance: 'click'
+    },
+    // ── 2. Drums ──
+    {
+      text: 'Try the drums!\nPress  A  S  D  F  G  H  J  K  L\non your keyboard.',
+      target: null, pos: 'center',
+      advance: 'keydown',
+      keys: ['KeyA','KeyS','KeyD','KeyF','KeyG','KeyH','KeyJ','KeyK','KeyL','Semicolon','Quote','Backslash']
+    },
+    // ── 3. Synth notes ──
+    {
+      text: 'Now play the synthesizer!\nQ W E R T Y U I O P \u2192 mid octave\nZ X C V B N M \u2192 low octave\nHold Shift for higher notes.',
+      target: null, pos: 'center',
+      advance: 'keydown',
+      keys: ['KeyZ','KeyX','KeyC','KeyV','KeyB','KeyN','KeyM','KeyQ','KeyW','KeyE','KeyR','KeyT','KeyY','KeyU','KeyI','KeyO','KeyP','BracketLeft','BracketRight']
+    },
+    // ── 4. Sustain pedal ──
+    {
+      text: 'Hold the Space bar to sustain notes.\nPress any key while holding Space,\nthen release to let them fade.',
+      target: null, pos: 'center',
+      advance: 'keydown',
+      keys: ['Space']
+    },
+    // ── 5. Scroll zoom ──
+    {
+      text: 'Use the scroll wheel\nto zoom in and out of the visuals.',
+      target: null, pos: 'center',
+      advance: 'wheel'
+    },
+    // ── 6. Double-click explosion ──
+    {
+      text: 'Double-click anywhere on the screen\nfor an explosion effect!',
+      target: null, pos: 'center',
+      advance: 'dblclick'
+    },
+    // ── 7. Expand MIDI Library ──
+    {
+      text: 'The MIDI Library contains example songs.\nDouble-click the title bar to expand it.',
+      target: function () { return midiFolderEl ? midiFolderEl.querySelector('.w95-titlebar') : null; },
+      pos: 'right',
+      advance: 'action',
+      check: function () { return midiFolderEl && !midiFolderMinimized; },
+      setup: function () {
+        if (!midiFolderEl) return;
+        midiFolderEl.style.display = '';
+        if (!midiFolderMinimized) {
+          midiFolderMinimized = true;
+          var b = midiFolderEl.querySelector('.w95-window-body');
+          if (b) b.style.display = 'none';
+          var g = midiFolderEl.querySelector('.w95-resize-handle');
+          if (g) g.style.display = 'none';
+        }
+      }
+    },
+    // ── 8. Play a MIDI file ──
+    {
+      text: 'Double-click any song\nto start automatic playback!\nWatch the visuals react to the music.',
+      target: function () { return midiFolderEl ? midiFolderEl.querySelector('.w95-filelist') : null; },
+      pos: 'right',
+      advance: 'action',
+      check: function () { return midiPlaybackActive; },
+      setup: function () { refreshMidiFolder(); }
+    },
+    // ── 9. MIDI playback controls ──
+    {
+      text: 'During MIDI playback:\nAlt + \u2191 / \u2193 \u2192 Change speed\nAlt + 0 \u2192 Reset speed\nEsc \u2192 Stop and clear sustain',
+      target: null, pos: 'center', advance: 'click'
+    },
+    // ── 10. Switch synth ──
+    {
+      text: 'Press  0  to cycle through\ndifferent synthesizers.\nTry it now!',
+      target: null, pos: 'center',
+      advance: 'keydown',
+      keys: ['Digit0']
+    },
+    // ── 11. Synth menu / Instruments ──
+    {
+      text: 'Click "Synth" in the top menu\nto see all instruments, or open\nthe Instruments rack panel.',
+      target: function () {
+        var items = document.querySelectorAll('.hud-menu-item');
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].textContent.indexOf('ynth') >= 0) return items[i];
+        }
+        return null;
+      },
+      pos: 'below',
+      advance: 'click'
+    },
+    // ── 12. Visual effects ──
+    {
+      text: 'Try visual effects:\n7 \u2192 Pixel density (soft / dense / hard)\n8 \u2192 Analog screen (clean / CRT / VHS)\n9 \u2192 Text engine (clean / glitch / overclock)',
+      target: null, pos: 'center',
+      advance: 'keydown',
+      keys: ['Digit7','Digit8','Digit9']
+    },
+    // ── 13. Harmony ──
+    {
+      text: 'Press  6  to enable smart harmony.\nYour single notes will automatically\ngenerate chords (3rds, 5ths, 9ths).',
+      target: null, pos: 'center',
+      advance: 'keydown',
+      keys: ['Digit6']
+    },
+    // ── 14. Extra modes ──
+    {
+      text: 'More features:\n1 \u2192 Microphone input\n2 \u2192 Auto-arpeggiator\n3 \u2192 Camera head tracking\n4 \u2192 Ambient mode (auto-play)\n5 \u2192 Freeze visuals 2 sec\n\u2212 / = \u2192 Master volume',
+      target: null, pos: 'center', advance: 'click'
+    },
+    // ── 15. Volume ──
+    {
+      text: 'Adjust master volume:\n\u2212  to decrease\n=  to increase\nCurrent: ' + (typeof masterVolume !== 'undefined' ? (masterVolume * 100 | 0) : 100) + '%',
+      target: null, pos: 'center',
+      advance: 'keydown',
+      keys: ['Minus','Equal','NumpadAdd','NumpadSubtract']
+    },
+    // ── 16. Help & finish ──
+    {
+      text: 'Press  ?  anytime for all shortcuts.\nReplay this tutorial from\nTools \u2192 Tutorial.\n\nEnjoy making music!',
+      target: null, pos: 'center', advance: 'click'
+    }
+  ];
+
+  function createTutorialUI() {
+    if (_tutEl) return;
+    // Callout box
+    _tutEl = document.createElement('div');
+    _tutEl.id = 'tutorial-callout';
+    _tutEl.innerHTML = '<div class="tut-text"></div><div class="tut-footer"><span class="tut-step-num"></span><button class="tut-btn tut-skip">Skip</button><button class="tut-btn tut-next">Next \u25B6</button></div>';
+    document.body.appendChild(_tutEl);
+
+    _tutEl.querySelector('.tut-skip').addEventListener('click', function (e) {
+      e.stopPropagation();
+      endTutorial();
+    });
+    _tutEl.querySelector('.tut-next').addEventListener('click', function (e) {
+      e.stopPropagation();
+      advanceTutorial();
+    });
+
+    // Spotlight highlight ring
+    _tutHighlight = document.createElement('div');
+    _tutHighlight.id = 'tutorial-highlight';
+    document.body.appendChild(_tutHighlight);
+  }
+
+  function positionCallout(step) {
+    if (!_tutEl) return;
+    var textEl = _tutEl.querySelector('.tut-text');
+    textEl.textContent = step.text;
+    _tutEl.querySelector('.tut-step-num').textContent = (_tutStep + 1) + ' / ' + TUTORIAL_STEPS.length;
+
+    // Show Next button for 'click' type, show action hint for others
+    var nextBtn = _tutEl.querySelector('.tut-next');
+    var hintEl = _tutEl.querySelector('.tut-action-hint');
+    if (!hintEl) {
+      hintEl = document.createElement('span');
+      hintEl.className = 'tut-action-hint';
+      _tutEl.querySelector('.tut-footer').insertBefore(hintEl, nextBtn);
+    }
+    if (step.advance === 'click') {
+      nextBtn.style.display = '';
+      hintEl.style.display = 'none';
+    } else {
+      nextBtn.style.display = 'none';
+      hintEl.style.display = '';
+      var hints = {
+        keydown: 'Press the key to continue',
+        wheel: 'Scroll to continue',
+        dblclick: 'Double-click to continue',
+        action: 'Do the action to continue'
+      };
+      hintEl.textContent = hints[step.advance] || '';
+    }
+
+    var target = null;
+    if (typeof step.target === 'function') target = step.target();
+    else if (typeof step.target === 'string') target = document.querySelector(step.target);
+
+    if (!target || step.pos === 'center') {
+      // Center on screen
+      _tutEl.style.left = '50%';
+      _tutEl.style.top = '50%';
+      _tutEl.style.transform = 'translate(-50%, -50%)';
+      _tutHighlight.style.display = 'none';
+      _tutEl.className = 'tut-callout';
+      return;
+    }
+
+    var rect = target.getBoundingClientRect();
+    _tutHighlight.style.display = '';
+    _tutHighlight.style.left = (rect.left - 4) + 'px';
+    _tutHighlight.style.top = (rect.top - 4) + 'px';
+    _tutHighlight.style.width = (rect.width + 8) + 'px';
+    _tutHighlight.style.height = (rect.height + 8) + 'px';
+
+    _tutEl.style.transform = 'none';
+    var cw = 260, ch = _tutEl.offsetHeight || 80;
+
+    if (step.pos === 'below') {
+      _tutEl.className = 'tut-callout tut-arrow-up';
+      _tutEl.style.left = Math.max(8, Math.min(window.innerWidth - cw - 8, rect.left + rect.width / 2 - cw / 2)) + 'px';
+      _tutEl.style.top = (rect.bottom + 10) + 'px';
+    } else if (step.pos === 'above') {
+      _tutEl.className = 'tut-callout tut-arrow-down';
+      _tutEl.style.left = Math.max(8, Math.min(window.innerWidth - cw - 8, rect.left + rect.width / 2 - cw / 2)) + 'px';
+      _tutEl.style.top = (rect.top - ch - 10) + 'px';
+    } else if (step.pos === 'right') {
+      _tutEl.className = 'tut-callout tut-arrow-left';
+      _tutEl.style.left = (rect.right + 10) + 'px';
+      _tutEl.style.top = Math.max(8, rect.top + rect.height / 2 - ch / 2) + 'px';
+    } else {
+      _tutEl.className = 'tut-callout tut-arrow-right';
+      _tutEl.style.left = (rect.left - cw - 10) + 'px';
+      _tutEl.style.top = Math.max(8, rect.top + rect.height / 2 - ch / 2) + 'px';
+    }
+  }
+
+  function showTutorialStep() {
+    if (_tutStep >= TUTORIAL_STEPS.length) { endTutorial(); return; }
+    var step = TUTORIAL_STEPS[_tutStep];
+    createTutorialUI();
+
+    // Run setup function if provided
+    if (typeof step.setup === 'function') step.setup();
+
+    _tutEl.style.display = '';
+    positionCallout(step);
+
+    // Set up advance listeners based on type
+    if (step.advance === 'keydown' && step.keys) {
+      _tutKeyHandler = function (e) {
+        if (step.keys.indexOf(e.code) >= 0) {
+          document.removeEventListener('keydown', _tutKeyHandler);
+          _tutKeyHandler = null;
+          setTimeout(advanceTutorial, 400);
+        }
+      };
+      document.addEventListener('keydown', _tutKeyHandler);
+    }
+    if (step.advance === 'wheel') {
+      _tutWheelHandler = function () {
+        document.removeEventListener('wheel', _tutWheelHandler);
+        _tutWheelHandler = null;
+        setTimeout(advanceTutorial, 400);
+      };
+      document.addEventListener('wheel', _tutWheelHandler);
+    }
+    if (step.advance === 'dblclick') {
+      _tutDblClickHandler = function () {
+        document.removeEventListener('dblclick', _tutDblClickHandler);
+        _tutDblClickHandler = null;
+        setTimeout(advanceTutorial, 400);
+      };
+      document.addEventListener('dblclick', _tutDblClickHandler);
+    }
+    if (step.advance === 'action' && step.check) {
+      _tutCheckInterval = setInterval(function () {
+        if (step.check()) {
+          clearInterval(_tutCheckInterval);
+          _tutCheckInterval = null;
+          setTimeout(advanceTutorial, 600);
+        }
+      }, 300);
+    }
+  }
+
+  var _tutKeyHandler = null;
+  var _tutWheelHandler = null;
+  var _tutDblClickHandler = null;
+  var _tutCheckInterval = null;
+
+  function _cleanupTutListeners() {
+    if (_tutKeyHandler) { document.removeEventListener('keydown', _tutKeyHandler); _tutKeyHandler = null; }
+    if (_tutWheelHandler) { document.removeEventListener('wheel', _tutWheelHandler); _tutWheelHandler = null; }
+    if (_tutDblClickHandler) { document.removeEventListener('dblclick', _tutDblClickHandler); _tutDblClickHandler = null; }
+    if (_tutCheckInterval) { clearInterval(_tutCheckInterval); _tutCheckInterval = null; }
+  }
+
+  function advanceTutorial() {
+    _cleanupTutListeners();
+    _tutStep++;
+    if (_tutStep >= TUTORIAL_STEPS.length) { endTutorial(); return; }
+    showTutorialStep();
+  }
+
+  function endTutorial() {
+    _tutActive = false;
+    _tutDismissed = true;
+    _cleanupTutListeners();
+    if (_tutEl) _tutEl.style.display = 'none';
+    if (_tutHighlight) _tutHighlight.style.display = 'none';
+    localStorage.setItem('sonicTutorialDone', '1');
+  }
+
+  function startTutorial() {
+    _cleanupTutListeners();
+    _tutStep = 0;
+    _tutActive = true;
+    _tutDismissed = false;
+    localStorage.removeItem('sonicTutorialDone');
+    showTutorialStep();
+  }
+
+  // Auto-start tutorial on first visit
+  if (!localStorage.getItem('sonicTutorialDone')) {
+    setTimeout(startTutorial, 1200);
+  }
   document.body.addEventListener('keydown', onKeyDown);
   document.body.addEventListener('keyup', onKeyUp);
   document.addEventListener('mousedown', onGridMouseDown);
