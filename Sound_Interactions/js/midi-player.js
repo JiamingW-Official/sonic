@@ -1654,6 +1654,55 @@ export function initMidiPlayer(api) {
   let detectedKeyRoot = 0;
   let detectedKeyScale = 'major';
   const KEYSIG_TO_MAJOR_ROOT = { '0': 0, '1': 7, '2': 2, '3': 9, '4': 4, '5': 11, '6': 6, '7': 1, '-1': 5, '-2': 10, '-3': 3, '-4': 8, '-5': 1, '-6': 6, '-7': 11 };
+
+  // Krumhansl-Kessler key profiles for note-based key detection
+  const KK_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+  const KK_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+
+  function detectKeyFromNotes(midi) {
+    // Build pitch class histogram from all non-drum tracks
+    const pc = new Array(12).fill(0);
+    let totalNotes = 0;
+    if (!midi || !midi.tracks) return { root: 0, scale: 'major' };
+    for (let ti = 0; ti < midi.tracks.length; ti++) {
+      const track = midi.tracks[ti];
+      const tname = (track.name && track.name.trim()) ? track.name : '';
+      if (isPercTrack(track, tname)) continue;
+      if (!track.notes || track.notes.length === 0) continue;
+      for (let ni = 0; ni < track.notes.length; ni++) {
+        const n = track.notes[ni];
+        const weight = (n.duration || 0.1) * (n.velocity || 0.5);
+        pc[n.midi % 12] += weight;
+        totalNotes++;
+      }
+    }
+    if (totalNotes === 0) return { root: 0, scale: 'major' };
+
+    // Correlate with all 24 keys (12 roots × major/minor)
+    let bestRoot = 0, bestScale = 'major', bestCorr = -Infinity;
+    for (let root = 0; root < 12; root++) {
+      for (let si = 0; si < 2; si++) {
+        const profile = si === 0 ? KK_MAJOR : KK_MINOR;
+        let sumXY = 0, sumX = 0, sumY = 0, sumX2 = 0, sumY2 = 0;
+        for (let i = 0; i < 12; i++) {
+          const x = pc[(root + i) % 12];
+          const y = profile[i];
+          sumXY += x * y; sumX += x; sumY += y;
+          sumX2 += x * x; sumY2 += y * y;
+        }
+        const n = 12;
+        const num = n * sumXY - sumX * sumY;
+        const den = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+        const corr = den > 0 ? num / den : 0;
+        if (corr > bestCorr) {
+          bestCorr = corr;
+          bestRoot = root;
+          bestScale = si === 0 ? 'major' : 'minor';
+        }
+      }
+    }
+    return { root: bestRoot, scale: bestScale };
+  }
   let rafId = null;
   let liveMidiNotes = [];
   let lastPolyphony = 0;
@@ -2636,17 +2685,28 @@ export function initMidiPlayer(api) {
       parsedMidi = null;
     }
 
-    // Detect key signature from MIDI header
+    // Detect key signature: prefer MIDI header, fallback to note analysis
     detectedKeyRoot = 0;
     detectedKeyScale = 'major';
+    let headerHasKey = false;
     if (parsedMidi && parsedMidi.header && parsedMidi.header.keySignatures && parsedMidi.header.keySignatures.length > 0) {
       const ks = parsedMidi.header.keySignatures[0];
-      const majorRoot = KEYSIG_TO_MAJOR_ROOT[String(ks.key)];
-      detectedKeyRoot = majorRoot != null ? majorRoot : 0;
-      detectedKeyScale = ks.scale === 'minor' ? 'minor' : 'major';
-      if (detectedKeyScale === 'minor') {
-        detectedKeyRoot = (detectedKeyRoot - 3 + 12) % 12;
+      // Skip if key=0 and scale=major (often just the default, not an actual annotation)
+      if (ks.key !== 0 || ks.scale === 'minor') {
+        const majorRoot = KEYSIG_TO_MAJOR_ROOT[String(ks.key)];
+        detectedKeyRoot = majorRoot != null ? majorRoot : 0;
+        detectedKeyScale = ks.scale === 'minor' ? 'minor' : 'major';
+        if (detectedKeyScale === 'minor') {
+          detectedKeyRoot = (detectedKeyRoot - 3 + 12) % 12;
+        }
+        headerHasKey = true;
       }
+    }
+    // Fallback: analyze pitch class distribution (Krumhansl-Kessler algorithm)
+    if (!headerHasKey && parsedMidi) {
+      const detected = detectKeyFromNotes(parsedMidi);
+      detectedKeyRoot = detected.root;
+      detectedKeyScale = detected.scale;
     }
     // Apply key signature (combined with current transpose)
     if (window.__sonicRemoteAPI && window.__sonicRemoteAPI.setKeySignature) {

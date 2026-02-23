@@ -221,8 +221,10 @@
     // Inject styles
     var style = document.createElement('style');
     style.textContent = [
-      '.sonic-remote-panel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:380px;z-index:1600;font-family:Tahoma,"MS Sans Serif",Arial,sans-serif}',
+      '.sonic-remote-panel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:380px;z-index:1600;font-family:Tahoma,"MS Sans Serif",Arial,sans-serif;transition:width 0.15s}',
       '.sonic-remote-panel .w95-window-body{padding:0;overflow:hidden}',
+      '.sonic-remote-panel.collapsed .w95-window-body{display:none}',
+      '.sonic-remote-panel.collapsed{width:200px}',
       // Hero section — dark gradient with QR
       '.srp-hero{background:linear-gradient(135deg,#0a0a2e 0%,#1a1a4e 50%,#0a1a3e 100%);padding:20px;text-align:center;position:relative}',
       '.srp-hero::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(16,132,208,0.08) 0%,transparent 70%);pointer-events:none}',
@@ -267,6 +269,14 @@
     var titlebar = el('div', 'w95-titlebar');
     titlebar.innerHTML = '<span style="margin-right:4px">\uD83D\uDCE1</span> <span class="w95-titlebar-text">Remote Control</span>';
     var btnGroup = el('div', 'w95-titlebar-buttons');
+    var minBtn = el('button', 'w95-titlebar-btn', '_');
+    minBtn.title = 'Collapse';
+    minBtn.onclick = function () {
+      adminPanel.classList.toggle('collapsed');
+      minBtn.textContent = adminPanel.classList.contains('collapsed') ? '\u25A1' : '_';
+      minBtn.title = adminPanel.classList.contains('collapsed') ? 'Expand' : 'Collapse';
+    };
+    btnGroup.appendChild(minBtn);
     var closeBtn = el('button', 'w95-titlebar-btn', '\u00d7');
     closeBtn.onclick = function () { adminPanel.style.display = 'none'; };
     btnGroup.appendChild(closeBtn);
