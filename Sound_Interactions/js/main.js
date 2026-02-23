@@ -10824,6 +10824,8 @@ import { initMidiPlayer } from './midi-player.js';
       }
     },
     initAudio: function () { initAudio(); },
+    playDrum: function (type, opts) { initAudio(); playDrum(type, opts); },
+    triggerVisualsForDrum: function (drumIndex) { triggerVisualsForDrum(drumIndex); },
     // Reset all mixer nodes + effect chains (called on new MIDI load)
     resetAllMixerState: function () {
       // Reset regular track mixer nodes

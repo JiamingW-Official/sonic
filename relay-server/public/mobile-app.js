@@ -228,7 +228,8 @@
     var slotDefs = [
       { key: 'instrument', icon: '\uD83C\uDFB9', label: 'Instrument', desc: 'Select synth \u00B7 Adjust tone params' },
       { key: 'mixer', icon: '\uD83C\uDF9A\uFE0F', label: 'Mixer', desc: 'Track volume \u00B7 Pan \u00B7 VU meters' },
-      { key: 'fx', icon: '\uD83C\uDF9B\uFE0F', label: 'FX', desc: 'Select track \u00B7 Add/adjust effects' }
+      { key: 'fx', icon: '\uD83C\uDF9B\uFE0F', label: 'FX', desc: 'Select track \u00B7 Add/adjust effects' },
+      { key: 'drums', icon: '\uD83E\uDD41', label: 'Drum Pad', desc: 'Launchpad \u00B7 Tap to trigger drums' }
     ];
 
     roleScreenSlots = {};
@@ -270,9 +271,10 @@
     var slotDescs = {
       instrument: 'Select synth \u00B7 Adjust tone params',
       mixer: 'Track volume \u00B7 Pan \u00B7 VU meters',
-      fx: 'Select track \u00B7 Add/adjust effects'
+      fx: 'Select track \u00B7 Add/adjust effects',
+      drums: 'Launchpad \u00B7 Tap to trigger drums'
     };
-    ['instrument', 'mixer', 'fx'].forEach(function (key) {
+    ['instrument', 'mixer', 'fx', 'drums'].forEach(function (key) {
       var card = roleScreenSlots[key];
       if (!card) return;
       var statusEl = document.getElementById('role-status-' + key);
@@ -301,7 +303,8 @@
     var slotNames = {
       instrument: '\uD83C\uDFB9 Instrument',
       mixer: '\uD83C\uDF9A\uFE0F Mixer',
-      fx: '\uD83C\uDF9B\uFE0F FX'
+      fx: '\uD83C\uDF9B\uFE0F FX',
+      drums: '\uD83E\uDD41 Drum Pad'
     };
     var tb = el('div', 'w95-titlebar');
     tb.style.position = 'relative';
@@ -333,6 +336,8 @@
       window.__mobileInitMixer(body, socket, serverState);
     } else if (slot === 'fx' && typeof window.__mobileInitFx === 'function') {
       window.__mobileInitFx(body, socket, serverState);
+    } else if (slot === 'drums' && typeof window.__mobileInitDrums === 'function') {
+      window.__mobileInitDrums(body, socket, serverState);
     } else {
       body.textContent = 'Loading controller: ' + slot + '...';
     }

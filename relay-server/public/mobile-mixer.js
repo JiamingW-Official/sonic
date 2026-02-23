@@ -34,7 +34,20 @@
     var row = document.createElement('div');
     row.className = 'mixer-channels-row';
 
+    // Master channel first (leftmost, fixed)
+    var masterTrack = null;
+    var otherTracks = [];
     tracks.forEach(function (t) {
+      if (t.trackIdx === -1) masterTrack = t;
+      else otherTracks.push(t);
+    });
+    if (masterTrack) {
+      var mch = buildChannel(masterTrack);
+      mch.el.classList.add('mixer-master-ch');
+      row.appendChild(mch.el);
+      channelEls.push(mch);
+    }
+    otherTracks.forEach(function (t) {
       var ch = buildChannel(t);
       row.appendChild(ch.el);
       channelEls.push(ch);

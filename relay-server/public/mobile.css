@@ -605,3 +605,80 @@ html, body {
   top: 50%;
   transform: translateY(-50%);
 }
+
+/* ── Mixer Master Channel ── */
+.mixer-master-ch {
+  border-right: 2px solid #404040 !important;
+  background: #ccc8c0 !important;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+/* ══════════════════════════════
+   Drum Pad Launchpad
+   ══════════════════════════════ */
+
+.drum-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 4px;
+  max-width: 400px;
+  margin: 0 auto;
+}
+.drum-pad {
+  background: #d4d0c8;
+  border: 2px outset #ddd;
+  box-shadow:
+    inset -1px -1px 0 #808080,
+    inset 1px 1px 0 #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+  position: relative;
+  transition: transform 0.05s;
+}
+.drum-pad:active,
+.drum-pad.active {
+  border-style: inset;
+  box-shadow:
+    inset 1px 1px 0 #808080,
+    inset -1px -1px 0 #fff;
+  transform: scale(0.96);
+  background: #000080;
+}
+.drum-pad.active .drum-pad-label {
+  color: #fff;
+}
+.drum-pad.active .drum-pad-key {
+  color: rgba(255,255,255,0.5);
+}
+.drum-pad.active .drum-pad-bar {
+  opacity: 1;
+  height: 6px;
+}
+.drum-pad-bar {
+  width: 100%;
+  height: 4px;
+  opacity: 0.7;
+  border-radius: 0 0 1px 1px;
+}
+.drum-pad-label {
+  font: bold 11px Tahoma, sans-serif;
+  color: #202020;
+  margin-top: 6px;
+  text-align: center;
+  line-height: 1.2;
+}
+.drum-pad-key {
+  font: 9px Tahoma, sans-serif;
+  color: #808080;
+  margin-top: 2px;
+}

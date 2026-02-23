@@ -174,6 +174,11 @@
         api.setMainEffectEnabled(params.effectName, params.enabled); break;
       case 'fx:main-param':
         api.setMainEffectParam(params.effectName, params.paramName, params.value); break;
+      case 'drum:play':
+        api.initAudio();
+        if (api.playDrum) api.playDrum(params.drumType, { velocity: params.velocity || 1.0 });
+        if (api.triggerVisualsForDrum) api.triggerVisualsForDrum(params.drumIndex || 0);
+        break;
     }
   }
 
@@ -398,7 +403,8 @@
     var slotDefs = [
       { key: 'instrument', label: 'Instrument', icon: '\uD83C\uDFB9', color: '#1084d0' },
       { key: 'mixer', label: 'Mixer', icon: '\uD83C\uDF9A\uFE0F', color: '#40a040' },
-      { key: 'fx', label: 'FX', icon: '\uD83C\uDF9B\uFE0F', color: '#d04040' }
+      { key: 'fx', label: 'FX', icon: '\uD83C\uDF9B\uFE0F', color: '#d04040' },
+      { key: 'drums', label: 'Drums', icon: '\uD83E\uDD41', color: '#d0a040' }
     ];
 
     slotDefs.forEach(function (def) {
@@ -452,7 +458,7 @@
         queueDiv.style.color = '#808080';
       } else {
         queueDiv.innerHTML = '';
-        var slotNames = { instrument: 'Instrument', mixer: 'Mixer', fx: 'FX' };
+        var slotNames = { instrument: 'Instrument', mixer: 'Mixer', fx: 'FX', drums: 'Drums' };
         queue.forEach(function (q) {
           var qRow = el('div', 'srp-queue-item');
           qRow.textContent = q.username + ' \u2192 ' + (slotNames[q.requestedSlot] || q.requestedSlot);

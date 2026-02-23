@@ -37,7 +37,7 @@ function genRoomId() {
 
 function broadcastSlots(room) {
   const slotData = {};
-  for (const s of ['instrument', 'mixer', 'fx']) {
+  for (const s of ['instrument', 'mixer', 'fx', 'drums']) {
     const occ = room.slots[s];
     slotData[s] = occ ? { socketId: occ.socketId, username: occ.username } : null;
   }
@@ -65,7 +65,7 @@ function removeClientFromRoom(room, socketId) {
   if (!client) return;
 
   // Release slot if occupied
-  for (const s of ['instrument', 'mixer', 'fx']) {
+  for (const s of ['instrument', 'mixer', 'fx', 'drums']) {
     if (room.slots[s] && room.slots[s].socketId === socketId) {
       room.slots[s] = null;
     }
@@ -115,7 +115,7 @@ io.on('connection', (socket) => {
     const room = {
       roomId,
       hostSocketId: socket.id,
-      slots: { instrument: null, mixer: null, fx: null },
+      slots: { instrument: null, mixer: null, fx: null, drums: null },
       queue: [],
       clients: new Map()
     };
@@ -199,14 +199,14 @@ io.on('connection', (socket) => {
     const room = findRoomByClient(socket.id);
     if (!room || !data || !data.slot) return;
     const slot = data.slot;
-    if (!['instrument', 'mixer', 'fx'].includes(slot)) return;
+    if (!['instrument', 'mixer', 'fx', 'drums'].includes(slot)) return;
 
     const client = room.clients.get(socket.id);
     if (!client) return;
 
     // Release current slot first
     if (client.currentSlot) {
-      for (const s of ['instrument', 'mixer', 'fx']) {
+      for (const s of ['instrument', 'mixer', 'fx', 'drums']) {
         if (room.slots[s] && room.slots[s].socketId === socket.id) {
           room.slots[s] = null;
         }
@@ -253,7 +253,7 @@ io.on('connection', (socket) => {
     if (!client || !client.currentSlot) return;
 
     const releasedSlot = client.currentSlot;
-    for (const s of ['instrument', 'mixer', 'fx']) {
+    for (const s of ['instrument', 'mixer', 'fx', 'drums']) {
       if (room.slots[s] && room.slots[s].socketId === socket.id) {
         room.slots[s] = null;
       }
@@ -315,7 +315,7 @@ io.on('connection', (socket) => {
 // Helper: build serializable slot/queue data
 function buildSlotData(room) {
   const d = {};
-  for (const s of ['instrument', 'mixer', 'fx']) {
+  for (const s of ['instrument', 'mixer', 'fx', 'drums']) {
     const occ = room.slots[s];
     d[s] = occ ? { socketId: occ.socketId, username: occ.username } : null;
   }

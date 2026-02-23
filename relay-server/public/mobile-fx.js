@@ -182,15 +182,20 @@
     fxContainer.style.marginTop = '8px';
     container.appendChild(fxContainer);
 
-    // Auto-select first track
+    // Auto-select Master bus by default
     if (tracks.length && !selectedTrack) {
+      var mainTrack = null;
+      for (var ti = 0; ti < tracks.length; ti++) {
+        if (tracks[ti].trackIdx === -1) { mainTrack = tracks[ti]; break; }
+      }
+      if (!mainTrack) mainTrack = tracks[0];
       selectedTrack = {
-        trackIdx: tracks[0].trackIdx,
-        isDrum: tracks[0].isDrum,
-        name: tracks[0].name,
-        isMain: tracks[0].trackIdx === -1
+        trackIdx: mainTrack.trackIdx,
+        isDrum: mainTrack.isDrum,
+        name: mainTrack.name,
+        isMain: mainTrack.trackIdx === -1
       };
-      highlightTrackBtn(tracks[0].trackIdx);
+      highlightTrackBtn(mainTrack.trackIdx);
       buildFxCards();
     }
   }
