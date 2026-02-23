@@ -8182,6 +8182,10 @@ import { initMidiPlayer } from './midi-player.js';
             showModeToast('Freeze 2s');
           } },
           '---',
+          { label: '📡 Remote Control', action: function () {
+            if (window.__sonicRemoteBridge) window.__sonicRemoteBridge.toggle();
+          } },
+          '---',
           { label: 'Tutorial', action: function () { startTutorial(); } },
           { label: 'Help', shortcut: '?', action: function () { toggleHelp(); } }
         ];
@@ -10680,4 +10684,145 @@ import { initMidiPlayer } from './midi-player.js';
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initGPGPU);
   else initGPGPU();
+
+  // ═══ Remote Control API (for remote-bridge.js) ═══
+  window.__sonicRemoteAPI = {
+    // Synth presets
+    getSynthPresets: function () {
+      return SYNTH_PRESETS.map(function (p, i) {
+        return {
+          name: p.name, key: p.key,
+          oscA: { type: p.oscA.type, detuneCenter: p.oscA.detuneCenter, gain: p.oscA.gain },
+          oscB: p.oscB ? { type: p.oscB.type, detuneCenter: p.oscB.detuneCenter, gain: p.oscB.gain, freqRatio: p.oscB.freqRatio } : null,
+          lowpass: { baseFreq: p.lowpass.baseFreq, Q: p.lowpass.Q },
+          drive: { amount: p.drive.amount, type: p.drive.type },
+          env: { atkSust: p.env.atkSust, decSust: p.env.decSust, susSust: p.env.susSust, relSust: p.env.relSust },
+          ui: p.ui
+        };
+      });
+    },
+    getSynthVariations: function () {
+      return SYNTH_VARIATIONS.map(function (arr) {
+        return arr.map(function (v) { return { name: v.name }; });
+      });
+    },
+    getCurrentSynthIndex: function () { return currentSynthIdx; },
+    getCurrentVariation: function () { return _synthCurrentVar.slice(); },
+    selectSynth: function (idx) {
+      if (idx >= 0 && idx < SYNTH_PRESETS.length) {
+        selectSynthInRack(idx);
+      }
+    },
+    setSynthParam: function (presetIdx, path, value) {
+      if (presetIdx < 0 || presetIdx >= SYNTH_PRESETS.length) return;
+      var P = SYNTH_PRESETS[presetIdx];
+      var parts = path.split('.');
+      var obj = P;
+      for (var i = 0; i < parts.length - 1; i++) {
+        obj = obj[parts[i]];
+        if (!obj) return;
+      }
+      obj[parts[parts.length - 1]] = value;
+      // Recompute derived env values if env was changed
+      if (parts[0] === 'env') {
+        P.env.atkShort = P.env.atkSust * 0.6; P.env.atkSched = P.env.atkSust * 0.8;
+        P.env.decShort = P.env.decSust * 0.6; P.env.decSched = P.env.decSust * 0.8;
+        P.env.susShort = P.env.susSust * 0.6; P.env.susSched = P.env.susSust * 0.75;
+        P.env.relShort = P.env.relSust * 0.65; P.env.relSched = P.env.relSust * 0.8;
+      }
+    },
+    applySynthVariation: function (presetIdx, varIdx) {
+      if (presetIdx >= 0 && presetIdx < SYNTH_PRESETS.length) {
+        applySynthVariation(presetIdx, varIdx);
+      }
+    },
+    refreshSynthRack: function () { refreshSynthRack(); },
+    refreshSynthEditor: function () {
+      if (synthEditorEl && synthEditorIdx >= 0) populateSynthEditor(synthEditorIdx);
+    },
+    // Audio: track volume/pan
+    setTrackVolume: function (trackIndex, vol) { initAudio(); setTrackVolume(trackIndex, vol); },
+    setTrackPan: function (trackIndex, pan) { initAudio(); setTrackPan(trackIndex, pan); },
+    setDrumTrackVolume: function (trackIndex, vol) {
+      initAudio();
+      var n = getDrumTrackMixerNode(trackIndex);
+      if (n) {
+        n.volume = clamp01(vol);
+        var t = audioCtx.currentTime;
+        n.gain.gain.cancelScheduledValues(t);
+        n.gain.gain.setValueAtTime(n.gain.gain.value, t);
+        n.gain.gain.linearRampToValueAtTime(n.volume, t + 0.035);
+      }
+    },
+    setDrumTrackPan: function (trackIndex, pan) {
+      initAudio();
+      var n = getDrumTrackMixerNode(trackIndex);
+      if (n && n.pan) {
+        n.panValue = Math.max(-1, Math.min(1, pan));
+        var t = audioCtx.currentTime;
+        n.pan.pan.cancelScheduledValues(t);
+        n.pan.pan.setValueAtTime(n.pan.pan.value, t);
+        n.pan.pan.linearRampToValueAtTime(n.panValue, t + 0.035);
+      }
+    },
+    // Effects
+    getTrackEffects: function (trackIndex, isDrum) {
+      var key = isDrum ? ('d' + trackIndex) : (trackIndex | 0);
+      if (!trackEffectChains.has(key)) trackEffectChains.set(key, createDefaultEffectChain());
+      return trackEffectChains.get(key);
+    },
+    setTrackEffectEnabled: function (trackIndex, isDrum, effectName, enabled) {
+      initAudio();
+      var key = isDrum ? ('d' + trackIndex) : (trackIndex | 0);
+      if (!trackEffectChains.has(key)) trackEffectChains.set(key, createDefaultEffectChain());
+      var chain = trackEffectChains.get(key);
+      if (!chain[effectName]) return;
+      if (!enabled && chain[effectName].nodes) {
+        destroyEffectNodes(effectName, chain[effectName].nodes);
+        chain[effectName].nodes = null;
+      }
+      chain[effectName].enabled = !!enabled;
+      if (isDrum) getDrumTrackMixerNode(trackIndex);
+      else getTrackMixerNode(trackIndex);
+      rebuildEffectChain(trackIndex, isDrum);
+    },
+    setTrackEffectParam: function (trackIndex, isDrum, effectName, paramName, value) {
+      initAudio();
+      var key = isDrum ? ('d' + trackIndex) : (trackIndex | 0);
+      if (!trackEffectChains.has(key)) return;
+      var chain = trackEffectChains.get(key);
+      if (!chain[effectName]) return;
+      chain[effectName].params[paramName] = value;
+      if (chain[effectName].enabled && chain[effectName].nodes) {
+        updateEffectParams(effectName, chain[effectName].nodes, chain[effectName].params);
+      }
+    },
+    getMainEffects: function () {
+      if (!trackEffectChains.has('main')) trackEffectChains.set('main', createDefaultEffectChain());
+      return trackEffectChains.get('main');
+    },
+    setMainEffectEnabled: function (effectName, enabled) {
+      initAudio();
+      if (!trackEffectChains.has('main')) trackEffectChains.set('main', createDefaultEffectChain());
+      var chain = trackEffectChains.get('main');
+      if (!chain[effectName]) return;
+      if (!enabled && chain[effectName].nodes) {
+        destroyEffectNodes(effectName, chain[effectName].nodes);
+        chain[effectName].nodes = null;
+      }
+      chain[effectName].enabled = !!enabled;
+      rebuildMainEffectChain();
+    },
+    setMainEffectParam: function (effectName, paramName, value) {
+      initAudio();
+      if (!trackEffectChains.has('main')) return;
+      var chain = trackEffectChains.get('main');
+      if (!chain[effectName]) return;
+      chain[effectName].params[paramName] = value;
+      if (chain[effectName].enabled && chain[effectName].nodes) {
+        updateEffectParams(effectName, chain[effectName].nodes, chain[effectName].params);
+      }
+    },
+    initAudio: function () { initAudio(); }
+  };
 })();

@@ -476,7 +476,6 @@ export function initMidiPlayer(api) {
         right: 0;
         height: 0%;
         background: linear-gradient(180deg, #ff0000 0%, #ffff00 30%, #00ff00 100%);
-        transition: height 0.06s linear;
       }
       .w95-mixer-master {
         border-left: 2px solid #000;
@@ -1658,6 +1657,54 @@ export function initMidiPlayer(api) {
   let selectedTrackCount = 0;
   let totalTrackCount = 0;
 
+  // ── VU Meter simulation ──
+  const _meterLevels = {};   // trackIndex → current level (0..1)
+  const METER_DECAY = 0.88;  // per-frame decay multiplier
+
+  function _meterNoteOn(trackIndex, velocity) {
+    var prev = _meterLevels[trackIndex] || 0;
+    _meterLevels[trackIndex] = Math.max(prev, velocity);
+  }
+
+  function updateMixerMeters() {
+    if (!mixerTrackData || !mixerTrackData.length) return;
+    // Decay all levels
+    for (var k in _meterLevels) {
+      _meterLevels[k] *= METER_DECAY;
+      if (_meterLevels[k] < 0.005) _meterLevels[k] = 0;
+    }
+    // Update DOM
+    for (var i = 0; i < mixerTrackData.length; i++) {
+      var ch = mixerTrackData[i];
+      if (!ch.meterFill) continue;
+      var lvl = _meterLevels[ch.trackIdx] || 0;
+      // Cap at fader level: read from fader fill height
+      var faderPct = parseFloat(ch.faderFill.style.height) || 80;
+      var cappedPct = Math.min(lvl * 100, faderPct);
+      ch.meterFill.style.height = cappedPct + '%';
+    }
+    // Master meter: max of all
+    var masterCh = null;
+    var maxLvl = 0;
+    for (var j = 0; j < mixerTrackData.length; j++) {
+      if (mixerTrackData[j].trackIdx === -1) { masterCh = mixerTrackData[j]; continue; }
+      var tl = _meterLevels[mixerTrackData[j].trackIdx] || 0;
+      if (tl > maxLvl) maxLvl = tl;
+    }
+    if (masterCh && masterCh.meterFill) {
+      var mFaderPct = parseFloat(masterCh.faderFill.style.height) || 80;
+      masterCh.meterFill.style.height = Math.min(maxLvl * 100, mFaderPct) + '%';
+    }
+  }
+
+  function resetMixerMeters() {
+    for (var k in _meterLevels) { _meterLevels[k] = 0; }
+    if (!mixerTrackData) return;
+    for (var i = 0; i < mixerTrackData.length; i++) {
+      if (mixerTrackData[i].meterFill) mixerTrackData[i].meterFill.style.height = '0%';
+    }
+  }
+
   function setProgressPlayingState(active) {
     if (!progressWrap) return;
     progressWrap.dataset.playing = active ? '1' : '0';
@@ -2208,6 +2255,7 @@ export function initMidiPlayer(api) {
     emitPlayback(false);
     emitTransport();
     updateMetrics();
+    resetMixerMeters();
     drawPianoRoll();
   }
 
@@ -2338,6 +2386,7 @@ export function initMidiPlayer(api) {
       while (onIdx < prepared.length && prepared[onIdx].on <= relNow + 0.012) {
         const note = prepared[onIdx++];
         if (note.drop) continue;
+        _meterNoteOn(note.trackIndex, note.velocity);
         if (!note.isDrum) {
           const cur = (activeMidiCounts.get(note.midi) || 0) + 1;
           activeMidiCounts.set(note.midi, cur);
@@ -2384,6 +2433,7 @@ export function initMidiPlayer(api) {
     function progressLoop() {
       updateProgressDisplay();
       drawPianoRoll();
+      updateMixerMeters();
       rafId = requestAnimationFrame(progressLoop);
     }
 
@@ -2409,6 +2459,7 @@ export function initMidiPlayer(api) {
       drawPianoRoll();
       updateMetrics();
       emitTransport();
+      resetMixerMeters();
       if (updateKeyDisplayFromMidi) updateKeyDisplayFromMidi([]);
     }, (segmentDurReal + 0.5) * 1000);
   }
@@ -2655,4 +2706,44 @@ export function initMidiPlayer(api) {
   if (typeof api.registerMidiLoader === 'function') {
     api.registerMidiLoader(loadMidiFromBuffer);
   }
+
+  // ═══ Remote Control API (for remote-bridge.js) ═══
+  window.__sonicMixerAPI = {
+    getMixerTrackData: function () {
+      return mixerTrackData.map(function (ch) {
+        return {
+          trackIdx: ch.trackIdx,
+          isDrum: ch.isDrum,
+          name: ch.el.querySelector('.w95-mixer-ch-label') ? ch.el.querySelector('.w95-mixer-ch-label').textContent : ('CH ' + ch.trackIdx),
+          volume: parseFloat(ch.faderFill.style.height) || 80,
+          pan: parseInt(ch.panInput.value, 10) || 0
+        };
+      });
+    },
+    getFxPresets: function () { return FX_PRESETS; },
+    getFxNames: function () { return ['eq', 'phaser', 'reverb', 'delay', 'chorus', 'distortion']; },
+    getMeterLevels: function () {
+      var out = {};
+      for (var k in _meterLevels) out[k] = _meterLevels[k];
+      return out;
+    },
+    updateFaderUI: function (trackIdx, pct) {
+      for (var i = 0; i < mixerTrackData.length; i++) {
+        if (mixerTrackData[i].trackIdx === trackIdx) {
+          mixerTrackData[i].setFaderVal(pct);
+          break;
+        }
+      }
+    },
+    updatePanUI: function (trackIdx, panVal) {
+      for (var i = 0; i < mixerTrackData.length; i++) {
+        if (mixerTrackData[i].trackIdx === trackIdx) {
+          var p = Math.round(panVal * 100);
+          mixerTrackData[i].panInput.value = p;
+          mixerTrackData[i].panLabel.textContent = p === 0 ? 'C' : (p < 0 ? 'L' + Math.abs(p) : 'R' + p);
+          break;
+        }
+      }
+    }
+  };
 }
