@@ -9172,31 +9172,72 @@ import { initMidiPlayer } from './midi-player.js?v=4';
   var TUTORIAL_STEPS = [
     // ── 1. Welcome ──
     {
-      text: 'Welcome to Sonic!\nA visual music playground.\nLet\u2019s learn how to use it.',
+      text: 'Welcome to Sonic!\nA visual music playground where\nevery key creates sound and art.\nLet\u2019s take a quick tour.',
       target: null, pos: 'center', advance: 'click'
     },
     // ── 2. Drums ──
     {
-      text: 'Try the drums!\nPress  A  S  D  F  G  H  J  K  L\non your keyboard.',
+      text: 'Try the drum pads!\nPress  A  S  D  F  G  H  J  K  L\nEach key is a different drum:\nkick \u00b7 snare \u00b7 808 \u00b7 clap \u00b7 hi-hat \u00b7 rim\u2026',
       target: null, pos: 'center',
       advance: 'keydown',
       keys: ['KeyA','KeyS','KeyD','KeyF','KeyG','KeyH','KeyJ','KeyK','KeyL','Semicolon','Quote','Backslash']
     },
     // ── 3. Synth notes ──
     {
-      text: 'Now play the synthesizer!\nQ W E R T Y U I O P \u2192 mid octave\nZ X C V B N M \u2192 low octave\nHold Shift for higher notes.',
+      text: 'Now play the synthesizer!\nZ\u2013M \u2192 low octave\nQ\u2013P \u2192 mid octave\n[  ] \u2192 high notes\nHold Shift to go one octave higher.',
       target: null, pos: 'center',
       advance: 'keydown',
       keys: ['KeyZ','KeyX','KeyC','KeyV','KeyB','KeyN','KeyM','KeyQ','KeyW','KeyE','KeyR','KeyT','KeyY','KeyU','KeyI','KeyO','KeyP','BracketLeft','BracketRight']
     },
     // ── 4. Sustain pedal ──
     {
-      text: 'Hold the Space bar to sustain notes.\nPress some keys while holding Space,\nthen release to let them fade.',
+      text: 'Hold  Space  to engage the sustain pedal.\nPlay some notes while holding Space,\nthen release to hear them fade out.',
       target: null, pos: 'center',
       advance: 'keydown',
       keys: ['Space']
     },
-    // ── 5. Expand MIDI Library ──
+    // ── 5. Switch synth ──
+    {
+      text: 'Press  0  to switch synthesizer.\n7 presets to explore:\nLead \u00b7 Bell \u00b7 Hypersaw \u00b7 Pluck\nOrgan \u00b7 Bass \u00b7 Chip',
+      target: null, pos: 'center',
+      advance: 'keydown',
+      keys: ['Digit0']
+    },
+    // ── 6. Visual effects ──
+    {
+      text: 'Each note has its own visual personality.\nTry these post-processing effects:\n7 \u2192 Pixel (soft / dense / hard)\n8 \u2192 Analog (clean / CRT / VHS)\n9 \u2192 Text (clean / glitch / overclock)',
+      target: null, pos: 'center',
+      advance: 'keydown',
+      keys: ['Digit7','Digit8','Digit9']
+    },
+    // ── 7. Harmony mode ──
+    {
+      text: 'Press  6  to cycle harmony modes.\nWhen playing 2+ keys, Sonic adds\nauto-chords: thirds, fifths, ninths.\nModes: OFF \u2192 AUTO3 \u2192 MAJ3 \u2192 MIN3 \u2192 5TH \u2192 9TH',
+      target: null, pos: 'center',
+      advance: 'keydown',
+      keys: ['Digit6']
+    },
+    // ── 8. Volume ──
+    {
+      text: 'Adjust volume:\n\u2212  decrease  \u00b7  =  increase\nTry it now!',
+      target: null, pos: 'center',
+      advance: 'keydown',
+      keys: ['Minus','Equal','NumpadAdd']
+    },
+    // ── 9. HUD Menu ──
+    {
+      text: 'The top menu bar has all features.\nClick "Synth" to browse instruments\nand tweak parameters.',
+      target: function () {
+        var items = document.querySelectorAll('.hud-menu-item');
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].textContent.indexOf('ynth') >= 0) return items[i];
+        }
+        return null;
+      },
+      pos: 'below',
+      advance: 'click'
+    },
+    // ── 10. Expand MIDI Library ──
     {
       text: 'The MIDI Library has example songs.\nDouble-click the title bar to expand it.',
       target: function () { return midiFolderEl ? midiFolderEl.querySelector('.w95-titlebar') : null; },
@@ -9215,9 +9256,9 @@ import { initMidiPlayer } from './midi-player.js?v=4';
         }
       }
     },
-    // ── 6. Select a MIDI file ──
+    // ── 11. Select a MIDI file ──
     {
-      text: 'Double-click a song to load it\ninto the MIDI player panel on the right.',
+      text: 'Double-click a song to load it\ninto the MIDI player.',
       target: function () { return midiFolderEl ? midiFolderEl.querySelector('.w95-filelist') : null; },
       pos: 'right',
       advance: 'action',
@@ -9227,9 +9268,9 @@ import { initMidiPlayer } from './midi-player.js?v=4';
       },
       setup: function () { refreshMidiFolder(); }
     },
-    // ── 7. Click Play ──
+    // ── 12. Click Play ──
     {
-      text: 'Click Play to start playback!\nWatch the visuals react to the music.',
+      text: 'Hit  \u25B6 Play  to start playback!\nWatch the particles dance to the music.',
       target: function () {
         var btns = document.querySelectorAll('.midi-float-panel .midi-player-btn');
         for (var i = 0; i < btns.length; i++) {
@@ -9241,46 +9282,36 @@ import { initMidiPlayer } from './midi-player.js?v=4';
       advance: 'action',
       check: function () { return midiPlaybackActive; }
     },
-    // ── 8. MIDI playback controls ──
+    // ── 13. MIDI tips ──
     {
-      text: 'During MIDI playback:\nAlt + \u2191 / \u2193 \u2192 Change speed\nAlt + 0 \u2192 Reset speed\nEsc \u2192 Stop and clear sustain',
+      text: 'MIDI playback tips:\nUse the menu to change speed & transpose.\nEsc \u2192 stop playback & clear sustain.\nThe key signature auto-detects from MIDI.',
       target: null, pos: 'center', advance: 'click'
     },
-    // ── 9. Switch synth ──
+    // ── 14. Remote Control — open panel ──
     {
-      text: 'Press  0  to cycle through\ndifferent synthesizers.\nTry it now!',
-      target: null, pos: 'center',
-      advance: 'keydown',
-      keys: ['Digit0']
-    },
-    // ── 10. Synth menu / Instruments ──
-    {
-      text: 'Click "Synth" in the top menu\nto see all instruments, or open\nthe Instruments rack panel.',
+      text: 'Let others control Sonic from phones!\nOpen  Tools \u2192 \uD83D\uDCE1 Remote Control\nto show the QR code panel.',
       target: function () {
         var items = document.querySelectorAll('.hud-menu-item');
         for (var i = 0; i < items.length; i++) {
-          if (items[i].textContent.indexOf('ynth') >= 0) return items[i];
+          if (items[i].textContent.indexOf('ools') >= 0) return items[i];
         }
         return null;
       },
       pos: 'below',
-      advance: 'click'
+      advance: 'action',
+      check: function () {
+        var panel = document.querySelector('.sonic-remote-panel');
+        return panel && panel.style.display !== 'none';
+      }
     },
-    // ── 11. Visual effects ──
+    // ── 15. Remote Control — explained ──
     {
-      text: 'Try visual effects:\n7 \u2192 Pixel density (soft / dense / hard)\n8 \u2192 Analog screen (clean / CRT / VHS)\n9 \u2192 Text engine (clean / glitch / overclock)',
-      target: null, pos: 'center',
-      advance: 'keydown',
-      keys: ['Digit7','Digit8','Digit9']
-    },
-    // ── 12. More features ──
-    {
-      text: 'More to explore:\n6 \u2192 Smart harmony (auto-chords)\n1 \u2192 Microphone   2 \u2192 Arpeggiator\n3 \u2192 Camera   4 \u2192 Ambient mode\n5 \u2192 Freeze visuals   \u2212 / = \u2192 Volume\nScroll \u2192 Zoom   Double-click \u2192 Explosion',
+      text: 'Scan the QR code from a phone to join.\n5 control slots:\n\uD83C\uDFB9 Instrument \u00b7 \uD83C\uDFA8 Mixer \u00b7 \uD83C\uDFDB FX\n\uD83E\uDD41 Drums \u00b7 \uD83C\uDFB9 Keys\nSpectators can send danmaku & emoji!',
       target: null, pos: 'center', advance: 'click'
     },
-    // ── 13. Done ──
+    // ── 16. Done ──
     {
-      text: 'Press  ?  anytime for all shortcuts.\nReplay this tutorial from\nTools \u2192 Tutorial.\n\nEnjoy making music!',
+      text: 'You\u2019re all set!\nPress  ?  anytime for the full shortcut list.\nTools \u2192 Tutorial to replay this guide.\n\nEnjoy making music! \u266B',
       target: null, pos: 'center', advance: 'click'
     }
   ];
