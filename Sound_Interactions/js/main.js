@@ -10390,21 +10390,20 @@ import { initMidiPlayer } from './midi-player.js?v=4';
     if (!crosshairEl) createCrosshairs();
     if (!scanlineEl) createScanline();
     if (!datastreamEl) createDatastream();
-    if (!gradientCornersEl) createGradientCorners();
+    // Gradient corners removed (Y2K style, not Win95)
     if (!spectrumEl) createSpectrum();
     if (!chordEl) createChordDisplay();
-    if (!arcEl) createArcRing();
-    if (!dotsEl) createBreathingDots();
+    // Arc ring and breathing dots removed (Y2K style, not Win95)
     if (!sysIdEl) createSysId();
     if (!noiseEl) createCrtOverlays();
     if (!velocityEl) createVelocityMeter();
     if (!keysigEl) createKeysigDisplay();
     if (!waveformEl) createWaveform();
-    if (!edgeLinesEl) createEdgeLines();
+    // Edge lines removed (Y2K style, not Win95)
     if (!beatStepEl) createBeatStepViz();
     if (!freqLabelEl) createFreqLabel();
     if (!polycountEl) createPolycount();
-    if (!tickerBars.length) createTickerBars();
+    // Ticker bars removed (Y2K style, not Win95)
     if (!constellationEl) createConstellation();
 
     // ═══ Y2K HUD: OPTIMIZED per-frame updates ═══
@@ -10430,28 +10429,21 @@ import { initMidiPlayer } from './midi-player.js?v=4';
       // ── Datastream (throttled to even frames) ──
       if (isEvenFrame) datastreamEl.style.opacity = Math.min(0.90, 0.25 + audioEnergy * 0.32 + impactFlash * 0.28 + kickFlash * 0.10);
 
-      // ── Gradient corners (flash hard on beat) ──
-      if (!isThrottled) gradientCornersEl.style.opacity = Math.min(0.50, 0.08 + impactFlash * 0.25 + kickFlash * 0.18 + audioEnergy * 0.10);
-      if (!isThrottled && y2kFrame % 3 === 0) {
-        gradientCornersEl.children[0].style.color = 'hsl(' + hueDeg + ',60%,72%)';
-        gradientCornersEl.children[1].style.color = 'hsl(' + ((hueDeg + 180) % 360) + ',55%,66%)';
-      }
+      // ── Gradient corners — removed (Win95 cleanup) ──
 
-      // ── Spectrum analyzer (throttled to even frames) ──
+      // ── Spectrum analyzer (throttled to even frames, WMP green/yellow/red) ──
       if (isEvenFrame && specBars.length) {
-        spectrumEl.style.opacity = Math.min(1.0, 0.40 + audioEnergy * 0.42 + impactFlash * 0.30 + kickFlash * 0.15);
+        spectrumEl.style.opacity = Math.min(1.0, 0.50 + audioEnergy * 0.35 + impactFlash * 0.20 + kickFlash * 0.10);
         const bl = bassLevel, ml = midLevel, tl = trebleLevel;
         const beatBoost = impactFlash * 28 + kickFlash * 18;
-        const bins0 = bl, bins1 = (bl + ml) * 0.5, bins2 = ml, bins3 = (ml + tl) * 0.5, bins4 = tl;
-        specBars[0].style.height = Math.max(3, (bins0 * 62 + beatBoost) | 0) + 'px';
-        specBars[1].style.height = Math.max(3, (bins1 * 62 + beatBoost * 0.8) | 0) + 'px';
-        specBars[2].style.height = Math.max(3, (bins2 * 62 + beatBoost * 0.6) | 0) + 'px';
-        specBars[3].style.height = Math.max(3, (bins3 * 62 + beatBoost * 0.8) | 0) + 'px';
-        specBars[4].style.height = Math.max(3, (bins4 * 62 + beatBoost) | 0) + 'px';
-        // Color update throttled to every 4th frame
-        if (y2kFrame % 4 === 0) {
-          for (let i = 0; i < 5; i++) {
-            specBars[i].style.background = 'hsla(' + ((hueDeg + i * 30) % 360) + ',65%,72%,0.85)';
+        const bins = [bl, (bl + ml) * 0.5, ml, (ml + tl) * 0.5, tl];
+        for (let i = 0; i < 5; i++) {
+          var h = Math.max(2, (bins[i] * 62 + beatBoost * (i === 0 || i === 4 ? 1 : 0.7)) | 0);
+          specBars[i].style.height = h + 'px';
+          // WMP-style color: green → yellow → red by level
+          if (y2kFrame % 4 === 0) {
+            var lvl = h / 62;
+            specBars[i].style.backgroundColor = lvl < 0.5 ? '#00c000' : lvl < 0.8 ? '#c0c000' : '#c00000';
           }
         }
       }
@@ -10466,45 +10458,20 @@ import { initMidiPlayer } from './midi-player.js?v=4';
             chordEl.style.opacity = '1';
             chordEl.childNodes[0].textContent = chord.name;
             chordSubEl.textContent = chord.sub;
-            chordEl.style.color = 'hsla(' + hueDeg + ',42%,92%,0.8)';
+            chordEl.style.color = '#00ff00';
           } else {
             chordEl.style.opacity = '0';
           }
         }
       }
 
-      // ── Arc ring (2 writes: dashoffset + opacity) ──
-      {
-        const circ = 119.38; // precomputed 2 * PI * 19
-        let pct, label;
-        if (typeof midiPlaybackProgress === 'number' && midiPlaybackActive) {
-          pct = midiPlaybackProgress;
-          label = ((pct * 100) | 0) + '%';
-        } else {
-          pct = 0.5 + 0.5 * syncA;
-          label = 'SYNC';
-        }
-        arcFgEl.style.strokeDashoffset = (circ * (1 - pct)).toFixed(1);
-        arcEl.style.opacity = Math.min(0.95, 0.42 + impactFlash * 0.40 + kickFlash * 0.12);
-        // Text + color update throttled
-        if (isEvenFrame) {
-          arcLabelEl.textContent = label;
-          arcFgEl.style.stroke = 'hsla(' + hueDeg + ',55%,78%,0.7)';
-        }
-      }
+      // ── Arc ring — removed (Win95 cleanup) ──
 
-      // ── Breathing dots (skip under pressure) ──
-      if (!isThrottled) dotsEl.style.opacity = Math.min(0.9, 0.25 + audioEnergy * 0.40 + impactFlash * 0.20 + kickFlash * 0.08);
+      // ── Breathing dots — removed (Win95 cleanup) ──
 
-      // ── System ID (chromatic glitch on beat, throttled) ──
+      // ── System ID (simple opacity, Win95 clean) ──
       if (isEvenFrame) {
-        sysIdEl.style.opacity = Math.min(1.0, isPlaying ? 0.45 + impactFlash * 0.40 + kickFlash * 0.15 : 0.65);
-        if (impactFlash > 0.35) {
-          const r = Math.random() * (4 + kickFlash * 8);
-          sysIdEl.style.textShadow = (2 + r) + 'px 0 rgba(255,50,80,' + (0.35 + kickFlash * 0.3) + '),' + (-2 - r) + 'px 0 rgba(50,200,255,' + (0.35 + kickFlash * 0.3) + '),0 0 ' + (10 + impactFlash * 14) + 'px rgba(120,180,255,0.25)';
-        } else if (impactFlash < 0.05) {
-          sysIdEl.style.textShadow = '';
-        }
+        sysIdEl.style.opacity = Math.min(1.0, isPlaying ? 0.45 + impactFlash * 0.35 + kickFlash * 0.12 : 0.60);
       }
 
       // ── CRT Noise (throttled) ──
@@ -10586,8 +10553,7 @@ import { initMidiPlayer } from './midi-player.js?v=4';
         waveformEl.style.opacity = isPlaying ? Math.min(1.0, 0.40 + audioEnergy * 0.35 + impactFlash * 0.30 + kickFlash * 0.15) : 0.12;
       }
 
-      // ── Edge lines (throttled to even frames) ──
-      if (isEvenFrame) edgeLinesEl.style.opacity = Math.min(0.85, 0.20 + impactFlash * 0.45 + kickFlash * 0.18 + audioEnergy * 0.12);
+      // ── Edge lines — removed (Win95 cleanup) ──
 
       // ── Beat Step Visualizer ──
       {
@@ -10636,22 +10602,7 @@ import { initMidiPlayer } from './midi-player.js?v=4';
         polycountEl.style.opacity = '0';
       }
 
-      // ── Ticker bars (throttled, skip under pressure) ──
-      if (isEvenFrame && !isThrottled && tickerBars.length) {
-        var tBands = [bassLevel, bassLevel * 0.7 + midLevel * 0.3, midLevel, midLevel * 0.5 + trebleLevel * 0.5, trebleLevel, trebleLevel * 0.8];
-        var tkBeat = impactFlash * 18 + kickFlash * 12;
-        for (var ti = 0; ti < 6; ti++) {
-          var tkLv = tBands[ti];
-          tickerBars[ti].style.width = (6 + tkLv * 30 + tkBeat | 0) + 'px';
-          tickerBars[ti].style.opacity = Math.min(0.85, 0.18 + tkLv * 0.48 + impactFlash * 0.18);
-        }
-        // Color update even less frequently
-        if (y2kFrame % 12 === 0) {
-          for (var tc = 0; tc < 6; tc++) {
-            tickerBars[tc].style.background = 'hsla(' + ((hueDeg + tc * 25) % 360) + ',50%,72%,0.4)';
-          }
-        }
-      }
+      // ── Ticker bars — removed (Win95 cleanup) ──
 
       // ── Constellation (every 2nd frame; every 4th when throttled) ──
       if ((isThrottled ? (y2kFrame & 3) === 0 : isEvenFrame) && constellationCtx) {
