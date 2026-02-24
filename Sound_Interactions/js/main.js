@@ -3921,15 +3921,9 @@ import { initMidiPlayer } from './midi-player.js?v=4';
   // ═══ Y2K Design Elements ═══
 
   function createBracketFrame() {
+    // Bracket frame removed — no longer created
     bracketFrameEl = document.createElement('div');
-    bracketFrameEl.className = 'y2k-bracket-frame';
-    bracketFrameEl.style.cssText = 'position:fixed;inset:0;z-index:1380;pointer-events:none;opacity:0.25';
-    const corners = ['tl', 'tr', 'bl', 'br'];
-    corners.forEach(c => {
-      const d = document.createElement('div');
-      d.className = 'y2k-bracket y2k-bracket-' + c;
-      bracketFrameEl.appendChild(d);
-    });
+    bracketFrameEl.style.display = 'none';
     document.body.appendChild(bracketFrameEl);
   }
 
@@ -8619,7 +8613,7 @@ import { initMidiPlayer } from './midi-player.js?v=4';
           gap: 7px;
           padding: 0;
           border-radius: 0;
-          font: 860 140px/1.0 "Lucida Console","Courier New","Tahoma","MS Sans Serif",monospace;
+          font: 860 110px/1.0 "Lucida Console","Courier New","Tahoma","MS Sans Serif",monospace;
           letter-spacing: -0.10em;
           flex: 0 0 18%;
           justify-content: center;
@@ -8660,16 +8654,16 @@ import { initMidiPlayer } from './midi-player.js?v=4';
         .note-head-code .glyph-ca-r {
           position: absolute;
           inset: 0 0 0 0;
-          color: rgba(255,76,122,0.34);
-          transform: translate(0.7px, -0.15px);
+          color: rgba(255,76,122,0.28);
+          transform: translate(0.25px, -0.08px);
           pointer-events: none;
           mix-blend-mode: screen;
         }
         .note-head-code .glyph-ca-c {
           position: absolute;
           inset: 0 0 0 0;
-          color: rgba(74,235,255,0.32);
-          transform: translate(-0.7px, 0.15px);
+          color: rgba(74,235,255,0.26);
+          transform: translate(-0.25px, 0.08px);
           pointer-events: none;
           mix-blend-mode: screen;
         }
@@ -10425,21 +10419,7 @@ import { initMidiPlayer } from './midi-player.js?v=4';
       const isEvenFrame = (y2kFrame & 1) === 0;
       const isThrottled = frameBudgetOver > 10; // under pressure — skip decorative
 
-      // ── Bracket frame — punchy scale burst + shake ──
-      bracketFrameEl.style.opacity = Math.min(1.0, 0.25 + impactFlash * 0.60 + kickFlash * 0.20 + 0.06 * (0.5 + 0.5 * syncA));
-      if (impactFlash > 0.25) {
-        const jx = (Math.random() - 0.5) * (6 + kickFlash * 10);
-        const jy = (Math.random() - 0.5) * (3 + kickFlash * 5);
-        const s = 1.0 + impactFlash * 0.10 + kickFlash * 0.05;
-        bracketFrameEl.style.transform = 'scale(' + s + ') translate(' + jx + 'px,' + jy + 'px)';
-      } else {
-        bracketFrameEl.style.transform = '';
-      }
-      // Color update only when hue changes (throttled)
-      if (isEvenFrame) {
-        const bc = 'hsla(' + hueDeg + ',45%,85%,0.7)';
-        for (let i = 0; i < 4; i++) bracketFrameEl.children[i].style.borderColor = bc;
-      }
+      // ── Bracket frame — removed ──
 
       // ── Crosshairs — flash on kick (opacity only, no filter) ──
       crosshairEl.style.opacity = isPlaying ? Math.min(1.0, 0.35 + impactFlash * 0.55 + kickFlash * 0.25) : 0.10;
@@ -10544,7 +10524,7 @@ import { initMidiPlayer } from './midi-player.js?v=4';
         glitchBarEl.style.height = '0';
       }
 
-      // ── Velocity meter (height + opacity, beat-reactive) ──
+      // ── Velocity meter (height + opacity, beat-reactive, Win95 segmented) ──
       {
         let avgVel = 0;
         if (noteCount > 0) {
@@ -10554,10 +10534,11 @@ import { initMidiPlayer } from './midi-player.js?v=4';
         }
         const velBoost = Math.min(1.0, avgVel + impactFlash * 0.15 + kickFlash * 0.10);
         velocityFillEl.style.height = ((velBoost * 100) | 0) + '%';
-        velocityEl.style.opacity = isPlaying ? 0.55 + impactFlash * 0.35 + kickFlash * 0.10 : 0.15;
-        // Gradient color throttled to every 6th frame (expensive to parse)
+        velocityEl.style.opacity = isPlaying ? 0.65 + impactFlash * 0.30 + kickFlash * 0.05 : 0.25;
+        // Win95 VU color: green → yellow → red based on level
         if (y2kFrame % 6 === 0) {
-          velocityFillEl.style.background = 'linear-gradient(0deg,hsla(' + hueDeg + ',60%,55%,0.6),hsla(' + ((hueDeg + 40) % 360) + ',70%,75%,0.8))';
+          var velColor = velBoost < 0.6 ? '#00c000' : velBoost < 0.85 ? '#c0c000' : '#c00000';
+          velocityFillEl.style.backgroundColor = velColor;
         }
       }
 

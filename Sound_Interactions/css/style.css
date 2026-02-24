@@ -1356,39 +1356,48 @@ body.w95-dragging { cursor: default !important; }
 
 /* ══════════ NEW ELEMENTS ══════════ */
 
-/* ── Velocity Meter ── RIGHT side vertical bar */
+/* ── Velocity Meter ── RIGHT side vertical bar (Win95 style) */
 #y2k-velocity {
   position: fixed;
   right: 2%;
   top: 50%;
   transform: translateY(-50%) translateZ(0);
-  width: 6px;
+  width: 10px;
   height: 120px;
   z-index: 1378;
   pointer-events: none;
-  mix-blend-mode: screen;
-  border-radius: 3px;
   overflow: hidden;
-  background: rgba(80, 140, 200, 0.06);
+  background: #000;
+  border: 1px solid #808080;
+  box-shadow: inset 1px 1px 0 #404040, inset -1px -1px 0 #c0c0c0;
 }
 #y2k-velocity-fill {
   position: absolute;
   bottom: 0;
-  left: 0;
-  right: 0;
+  left: 1px;
+  right: 1px;
   height: 0%;
-  border-radius: 3px;
+  background: #00ff00;
   transition: height 60ms ease-out;
   will-change: height;
+  image-rendering: pixelated;
+  /* Win95 segmented bar pattern */
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 3px,
+    #000 3px,
+    #000 4px
+  );
 }
 #y2k-velocity-label {
   position: absolute;
-  right: 12px;
+  right: 14px;
   top: 50%;
   transform: translateY(-50%);
-  font: 400 7px/1 var(--ui-code-font);
-  letter-spacing: 0.15em;
-  color: rgba(180, 220, 255, 0.3);
+  font: 700 8px/1 "Tahoma","MS Sans Serif",sans-serif;
+  letter-spacing: 0.08em;
+  color: rgba(192, 192, 192, 0.5);
   white-space: nowrap;
   writing-mode: vertical-rl;
   text-orientation: mixed;
