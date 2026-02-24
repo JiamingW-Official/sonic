@@ -7659,10 +7659,10 @@ import { initMidiPlayer } from './midi-player.js?v=4';
     synthRackEl = document.createElement('div');
     synthRackEl.id = 'synth-rack-window';
     synthRackEl.className = 'w95-window';
-    synthRackEl.style.left = '12px';
-    synthRackEl.style.bottom = '100px';
-    synthRackEl.style.top = 'auto';
-    synthRackEl.style.right = 'auto';
+    synthRackEl.style.left = 'auto';
+    synthRackEl.style.bottom = 'auto';
+    synthRackEl.style.top = '28px';
+    synthRackEl.style.right = '392px';
     synthRackEl.style.transform = 'none';
     synthRackEl.style.width = '185px';
     synthRackEl.style.zIndex = '1500';
@@ -8654,16 +8654,16 @@ import { initMidiPlayer } from './midi-player.js?v=4';
         .note-head-code .glyph-ca-r {
           position: absolute;
           inset: 0 0 0 0;
-          color: rgba(255,76,122,0.28);
-          transform: translate(0.25px, -0.08px);
+          color: rgba(255,76,122,0.22);
+          transform: translate(0.08px, -0.03px);
           pointer-events: none;
           mix-blend-mode: screen;
         }
         .note-head-code .glyph-ca-c {
           position: absolute;
           inset: 0 0 0 0;
-          color: rgba(74,235,255,0.26);
-          transform: translate(-0.25px, 0.08px);
+          color: rgba(74,235,255,0.20);
+          transform: translate(-0.08px, 0.03px);
           pointer-events: none;
           mix-blend-mode: screen;
         }
