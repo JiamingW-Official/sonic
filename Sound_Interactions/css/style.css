@@ -1119,16 +1119,18 @@ body.w95-dragging { cursor: default !important; }
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  height: 56px;
+  height: 36px;
   padding: 3px;
   background: #000;
   border: 1px solid #808080;
   box-shadow: inset 1px 1px 0 #404040, inset -1px -1px 0 #c0c0c0;
   opacity: 0.7;
+  overflow: hidden;
 }
 .y2k-spec-bar {
   width: 6px;
   min-height: 2px;
+  max-height: 30px;
   border-radius: 0;
   transition: height 60ms ease-out;
   will-change: height;
@@ -1142,27 +1144,34 @@ body.w95-dragging { cursor: default !important; }
   );
 }
 
-/* ── Chord Display ── LEFT side, above note text */
+/* ── Chord Display ── BOTTOM-RIGHT, Win95 inset panel */
 #y2k-chord {
   position: fixed;
-  bottom: 30%;
-  left: 2.5%;
+  bottom: 4.5%;
+  right: 2.5%;
   z-index: 1378;
   pointer-events: none;
-  font: 700 36px/1 'Tahoma', 'Segoe UI', var(--ui-code-font);
-  letter-spacing: 0.05em;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+  background: #000;
+  border: 1px solid #808080;
+  box-shadow: inset 1px 1px 0 #404040, inset -1px -1px 0 #c0c0c0;
+  font: 700 18px/1 'Tahoma', 'Segoe UI', var(--ui-code-font);
+  letter-spacing: 0.04em;
   color: #00ff00;
-  text-shadow: 0 0 6px rgba(0, 255, 0, 0.3);
+  text-shadow: 0 0 4px rgba(0, 255, 0, 0.25);
   opacity: 0;
   transition: opacity 0.15s;
 }
-.y2k-chord-name { display: block; }
+.y2k-chord-name { white-space: nowrap; }
 #y2k-chord-sub {
-  font: 400 9px/1.4 'Tahoma', 'Segoe UI', var(--ui-code-font);
-  letter-spacing: 0.2em;
-  color: rgba(192, 192, 192, 0.5);
-  margin-top: 4px;
+  font: 400 8px/1 'Tahoma', 'Segoe UI', var(--ui-code-font);
+  letter-spacing: 0.15em;
+  color: #808080;
   text-shadow: none;
+  white-space: nowrap;
 }
 
 /* ── Arc Progress Ring — removed ── */

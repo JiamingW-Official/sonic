@@ -3998,7 +3998,7 @@ import { initMidiPlayer } from './midi-player.js?v=4';
     var chordNameSpan = document.createElement('span');
     chordNameSpan.className = 'y2k-chord-name';
     chordEl.appendChild(chordNameSpan);
-    chordSubEl = document.createElement('div');
+    chordSubEl = document.createElement('span');
     chordSubEl.id = 'y2k-chord-sub';
     chordEl.appendChild(chordSubEl);
     document.body.appendChild(chordEl);
@@ -10438,11 +10438,11 @@ import { initMidiPlayer } from './midi-player.js?v=4';
         const beatBoost = impactFlash * 28 + kickFlash * 18;
         const bins = [bl, (bl + ml) * 0.5, ml, (ml + tl) * 0.5, tl];
         for (let i = 0; i < 5; i++) {
-          var h = Math.max(2, (bins[i] * 62 + beatBoost * (i === 0 || i === 4 ? 1 : 0.7)) | 0);
+          var h = Math.min(30, Math.max(2, (bins[i] * 30 + beatBoost * 0.4 * (i === 0 || i === 4 ? 1 : 0.7)) | 0));
           specBars[i].style.height = h + 'px';
           // WMP-style color: green → yellow → red by level
           if (y2kFrame % 4 === 0) {
-            var lvl = h / 62;
+            var lvl = h / 30;
             specBars[i].style.backgroundColor = lvl < 0.5 ? '#00c000' : lvl < 0.8 ? '#c0c000' : '#c00000';
           }
         }
