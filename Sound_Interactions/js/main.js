@@ -4305,12 +4305,12 @@ import { initMidiPlayer } from './midi-player.js?v=4';
     // ── L3: Ambient particles (burst outward on kick) ──
     if (!constellationParticles) {
       constellationParticles = [];
-      for (var pp = 0; pp < 14; pp++) {
+      for (var pp = 0; pp < 8; pp++) {
         constellationParticles.push({ a: Math.random() * PI2, r: Math.random() * 0.6 + 0.2, speed: (Math.random() - 0.5) * 0.004, drift: Math.random() * 0.002 });
       }
     }
     ctx.globalAlpha = 0.3 + energy * 0.4 + kick * 0.2;
-    for (var pi = 0; pi < 14; pi++) {
+    for (var pi = 0; pi < constellationParticles.length; pi++) {
       var pt = constellationParticles[pi];
       pt.a += pt.speed + energy * 0.012 + kick * 0.04;
       pt.r += pt.drift + kick * 0.02;
@@ -4352,8 +4352,11 @@ import { initMidiPlayer } from './midi-player.js?v=4';
     }
     if (activeIdxs.length >= 2) {
       ctx.lineCap = 'round';
-      for (var a = 0; a < activeIdxs.length; a++) {
-        for (var b = a + 1; b < activeIdxs.length; b++) {
+      // Limit arc pairs for perf (max 10 arcs)
+      var arcCount = 0;
+      for (var a = 0; a < activeIdxs.length && arcCount < 10; a++) {
+        for (var b = a + 1; b < activeIdxs.length && arcCount < 10; b++) {
+          arcCount++;
           var na = nodes[activeIdxs[a]], nb = nodes[activeIdxs[b]];
           var interval = Math.abs(activeIdxs[b] - activeIdxs[a]);
           if (interval > 6) interval = 12 - interval;
@@ -4365,19 +4368,12 @@ import { initMidiPlayer } from './midi-player.js?v=4';
           var curveAmt = tension * 0.4 * dir;
           var cpx = mx + perpX / pLen * curveAmt * R;
           var cpy = my + perpY / pLen * curveAmt * R;
-          // Glow
+          // Single arc line (merged glow+core for perf)
           ctx.beginPath();
           ctx.moveTo(na.x, na.y);
           ctx.quadraticCurveTo(cpx, cpy, nb.x, nb.y);
-          ctx.strokeStyle = 'hsla(' + ((hueDeg + 180) % 360) + ',75%,78%,' + (0.08 + impact * 0.12).toFixed(2) + ')';
-          ctx.lineWidth = 8 + impact * 4;
-          ctx.stroke();
-          // Core
-          ctx.beginPath();
-          ctx.moveTo(na.x, na.y);
-          ctx.quadraticCurveTo(cpx, cpy, nb.x, nb.y);
-          ctx.strokeStyle = 'hsla(' + ((hueDeg + 180) % 360) + ',68%,85%,' + (0.45 + impact * 0.25).toFixed(2) + ')';
-          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = 'hsla(' + ((hueDeg + 180) % 360) + ',70%,82%,' + (0.35 + impact * 0.20).toFixed(2) + ')';
+          ctx.lineWidth = 2 + impact * 2;
           ctx.stroke();
         }
       }
@@ -4399,19 +4395,14 @@ import { initMidiPlayer } from './midi-player.js?v=4';
       var nd = nodes[k];
       var fade = nd.fade;
       if (nd.active) {
-        // Beat-scaled glow layers
+        // Beat-scaled glow layers (2 layers for perf)
         var beatScale = 1 + impact * 0.6 + kick * 0.4;
-        // L1: wide glow
+        // L1: glow
         ctx.beginPath();
-        ctx.arc(nd.x, nd.y, (20 + nd.vel * 8) * beatScale, 0, PI2);
-        ctx.fillStyle = 'hsla(' + hueDeg + ',85%,78%,' + (0.06 + kick * 0.04).toFixed(3) + ')';
+        ctx.arc(nd.x, nd.y, (12 + nd.vel * 5) * beatScale, 0, PI2);
+        ctx.fillStyle = 'hsla(' + hueDeg + ',84%,80%,' + (0.14 + impact * 0.08 + kick * 0.04).toFixed(3) + ')';
         ctx.fill();
-        // L2: mid glow
-        ctx.beginPath();
-        ctx.arc(nd.x, nd.y, (10 + nd.vel * 4) * beatScale, 0, PI2);
-        ctx.fillStyle = 'hsla(' + hueDeg + ',82%,82%,' + (0.16 + impact * 0.10).toFixed(2) + ')';
-        ctx.fill();
-        // L3: core
+        // L2: core
         ctx.beginPath();
         ctx.arc(nd.x, nd.y, (5 + nd.vel * 2) * beatScale, 0, PI2);
         ctx.fillStyle = 'hsla(' + hueDeg + ',78%,95%,0.95)';
@@ -8725,10 +8716,10 @@ import { initMidiPlayer } from './midi-player.js?v=4';
       'transition:opacity 120ms ease-out'
     ].join(';');
     const rows = [
-      { top: '58%', left: '3%', right: '30%', alpha: 0.98, blur: 0, kind: 'top' },
-      { top: '30%', left: '70%', right: '2.5%', alpha: 0.72, blur: 0.22, kind: 'right' },
-      { top: '67%', left: '2.5%', right: '70%', alpha: 0.68, blur: 0.18, kind: 'left' },
-      { top: '88%', left: '4%', right: '4%', alpha: 0.56, blur: 0.32, kind: 'bottom' }
+      { top: '72%', left: '3%', right: '30%', alpha: 0.98, blur: 0, kind: 'top' },
+      { top: '44%', left: '70%', right: '2.5%', alpha: 0.72, blur: 0.22, kind: 'right' },
+      { top: '80%', left: '2.5%', right: '70%', alpha: 0.68, blur: 0.18, kind: 'left' },
+      { top: '92%', left: '4%', right: '4%', alpha: 0.56, blur: 0.32, kind: 'bottom' }
     ];
     rows.forEach((cfg, idx) => {
       const row = document.createElement('div');
@@ -9529,9 +9520,11 @@ import { initMidiPlayer } from './midi-player.js?v=4';
     renderer.autoClear = true;
   }
 
+  var _animFrameN = 0;
   function animate() {
     requestAnimationFrame(animate);
     if (!renderer || !scene || !camera) return;
+    _animFrameN++;
     var _frameStart = performance.now();
     const now = _frameStart * 0.001;
     time = now;
@@ -9718,10 +9711,13 @@ import { initMidiPlayer } from './midi-player.js?v=4';
         gpuCompute.compute();
         particlePoints.material.uniforms.positionTexture.value = gpuCompute.getCurrentRenderTarget(positionVariable).texture;
         particlePoints.material.uniforms.time.value = now;
-        particlePoints.material.uniforms.keyHue.value = currentKeyHue;
-        particlePoints.material.uniforms.sparkleFlash.value = sparkleFlash;
-        particlePoints.material.uniforms.padLevel.value = padLevel;
-        particlePoints.material.uniforms.attractorCol.value = attractor.col != null ? attractor.col : 0;
+        // Update cosmetic uniforms every 2nd frame
+        if ((_animFrameN & 1) === 0) {
+          particlePoints.material.uniforms.keyHue.value = currentKeyHue;
+          particlePoints.material.uniforms.sparkleFlash.value = sparkleFlash;
+          particlePoints.material.uniforms.padLevel.value = padLevel;
+          particlePoints.material.uniforms.attractorCol.value = attractor.col != null ? attractor.col : 0;
+        }
       } catch (e) {
         useGPGPU = false;
         console.warn('GPGPU compute error, switching to fallback:', e && e.message ? e.message : e);
@@ -10340,10 +10336,13 @@ import { initMidiPlayer } from './midi-player.js?v=4';
     for (const dk in lastDrumTypeImpact) {
       drumTypeFlashes[dk] = Math.pow(Math.max(0, 1 - (now - lastDrumTypeImpact[dk]) / 0.13), 0.5) * 0.35;
     }
-    updateRoll3DLayer(now, syncA, syncB, impactFlash, currentKeyHue, kickFlash, minorDrumFlash, drumTypeFlashes, headOffset_g, headOffsetY);
+    // Throttle heavy updates to every 2nd frame for perf
+    if ((_animFrameN & 1) === 0) {
+      updateRoll3DLayer(now, syncA, syncB, impactFlash, currentKeyHue, kickFlash, minorDrumFlash, drumTypeFlashes, headOffset_g, headOffsetY);
+    }
 
     if (Math.floor(now * 6) % 1 === 0) updateHud();
-    updateKeyDisplay();
+    if ((_animFrameN & 1) === 0) updateKeyDisplay();
     updateNoteRepeatOverlay();
     if (keyDisplayMesh && keyDisplayMesh.visible && keyDisplayMesh.userData.baseY != null) {
       keyDisplayMesh.position.y = keyDisplayMesh.userData.baseY + 0.014 * Math.sin(now * 0.45);
@@ -10420,8 +10419,8 @@ import { initMidiPlayer } from './midi-player.js?v=4';
 
       // ── Bracket frame — removed ──
 
-      // ── Crosshairs — flash on kick (opacity only, no filter) ──
-      crosshairEl.style.opacity = isPlaying ? Math.min(1.0, 0.35 + impactFlash * 0.55 + kickFlash * 0.25) : 0.10;
+      // ── Crosshairs — flash on kick (opacity only, no filter, even frames) ──
+      if (isEvenFrame) crosshairEl.style.opacity = isPlaying ? Math.min(1.0, 0.35 + impactFlash * 0.55 + kickFlash * 0.25) : 0.10;
 
       // ── Scanline (throttled to even frames) ──
       if (isEvenFrame) scanlineEl.style.opacity = Math.min(1.0, 0.45 + impactFlash * 0.50 + kickFlash * 0.12);
@@ -10604,8 +10603,8 @@ import { initMidiPlayer } from './midi-player.js?v=4';
 
       // ── Ticker bars — removed (Win95 cleanup) ──
 
-      // ── Constellation (every 2nd frame; every 4th when throttled) ──
-      if ((isThrottled ? (y2kFrame & 3) === 0 : isEvenFrame) && constellationCtx) {
+      // ── Constellation (every 3rd frame; every 6th when throttled) ──
+      if ((isThrottled ? (y2kFrame % 6) === 0 : (y2kFrame % 3) === 0) && constellationCtx) {
         if (kickFlash > 0.25 && constellationShockwave <= 0) constellationShockwave = 1;
         drawConstellation(hueDeg, activeNotes, audioEnergy, impactFlash, kickFlash, now);
         constellationEl.style.opacity = isPlaying ? Math.min(1.0, 0.70 + impactFlash * 0.30 + kickFlash * 0.15) : 0.4;
